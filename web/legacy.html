@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" type="image/png" href="/favicon.png" />
+  <title>bitwise</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <section id="agent-grid" data-layout-section="agent-grid">
+      <div id="boss-frame" class="agent-frame boss">
+        <div class="agent-frame-inner">
+          <div class="frame-main">
+            <canvas id="boss-sprite" width="15" height="15"></canvas>
+            <div id="boss-name" class="creature-name">Boss</div>
+            <div id="boss-thinking"></div>
+            <div id="boss-center" class="agent-stats"></div>
+            <div id="boss-right" class="agent-project"></div>
+            <div id="boss-mode-toggle" title="click to switch between route and manager mode">
+              <span class="boss-mode-label">route</span>
+              <span class="boss-mode-track"><span class="boss-mode-knob"></span></span>
+              <span class="boss-mode-label">manager</span>
+            </div>
+          </div>
+        </div>
+        <div class="frame-footer"><div class="footer-fill"></div></div>
+      </div>
+    </section>
+
+    <div id="top-controls">
+      <div id="new-agent-btn" title="new agent">
+        <span id="add-btn">+</span>
+      </div>
+      <div id="toggle-solo">
+        <span class="control-label">solo</span>
+        <span id="solo-btn">○</span>
+      </div>
+      <div id="toggle-verbose">
+        <span class="control-label">verbose</span>
+        <span id="verbose-btn">○</span>
+      </div>
+      <div id="settings-btn" title="settings">
+        <canvas id="settings-icon" width="9" height="9"></canvas>
+      </div>
+    </div>
+    <div id="debug-panel" style="display:none">
+      <div id="debug-header">debug log <span id="debug-close">x</span></div>
+      <div id="debug-output"></div>
+    </div>
+    <div id="chat-lanes" data-layout-section="chat">
+      <div class="lane lane-zero" data-lane-id="general">
+        <div id="chat-link-bar" style="display:none"></div>
+        <div id="chat-response"></div>
+        <div id="task-panel"></div>
+        <div id="active-agents-bar"></div>
+        <div id="image-queue"></div>
+        <footer id="chat-bar">
+          <span class="prompt">&gt;</span>
+          <textarea id="chat-input" placeholder="type a command..." autocomplete="off" rows="1"></textarea>
+          <span id="boss-stop" title="stop boss (Esc)">■</span>
+        </footer>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="src/main.ts"></script>
+</body>
+</html>

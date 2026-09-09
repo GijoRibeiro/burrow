@@ -1,0 +1,6693 @@
+@font-face {
+  font-family: 'PixelPurl';
+  src: url('/assets/fonts/PixelPurl.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Gridbit';
+  src: url('/assets/fonts/Gridbit.otf') format('opentype');
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  /* User-tunable background color (settings → appearance). The
+   * canonical dark base — falls back to the default if no override
+   * is stored. Every panel that paints a solid surface uses
+   * `background: var(--bg)` so the whole UI follows whatever the
+   * user picks. Dither patterns keep the literal #2e2f38 in their
+   * gradients so the cream cells stay readable against any bg. */
+  --bg: #2e2f38;
+  /* User-tunable chat font (settings → appearance → chat font).
+   * Defaults to the project's coding stack; settings.ts swaps this
+   * variable when the user picks a Google Font, after lazy-loading
+   * the font's stylesheet. Every chat surface reads this so one
+   * write switches them in lockstep. */
+  --chat-font: 'JetBrains Mono', 'Menlo', monospace;
+}
+
+body {
+  background: var(--bg);
+  color: #eae5ce;
+  font-family: 'Gridbit', 'PixelPurl', 'Courier New', monospace;
+  height: 100vh;
+  overflow: hidden;
+  image-rendering: pixelated;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* --- Boss Frame (gold accent only on name/thinking; otherwise
+ * matches the regular agent-frame proportions and dither so the
+ * boss reads as part of the same row instead of a separate card). */
+.agent-frame.boss {
+  order: -1;
+  cursor: pointer;
+}
+
+.agent-frame.boss .creature-name {
+  color: #e0aa5a;
+  font-size: calc(16px * var(--ui-scale, 1));
+}
+
+.agent-frame.boss .agent-stats,
+.agent-frame.boss .agent-project {
+  font-size: calc(11px * var(--ui-scale, 1));
+}
+
+.agent-frame.boss #boss-thinking {
+  font-size: calc(12px * var(--ui-scale, 1));
+}
+
+#boss-mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  cursor: pointer;
+  user-select: none;
+  font-size: calc(11px * var(--ui-scale, 1));
+  font-family: 'Gridbit', 'PixelPurl', 'Courier New', monospace;
+}
+
+.boss-mode-label {
+  /* Inactive label kept readable (was 0.35 → near-invisible) so the toggle
+   * is easy to find; the active side still pops gold below. */
+  opacity: 0.6;
+  transition: opacity 0.15s;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+#boss-mode-toggle.mode-route .boss-mode-label:first-child,
+#boss-mode-toggle.mode-manager .boss-mode-label:last-child {
+  opacity: 1;
+  color: #e0aa5a;
+}
+
+.boss-mode-track {
+  position: relative;
+  width: calc(28px * var(--ui-scale, 1));
+  height: calc(13px * var(--ui-scale, 1));
+  background: #1a1b22;
+  border: 1px solid #eae5ce;
+  display: inline-block;
+}
+
+.boss-mode-knob {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: calc(11px * var(--ui-scale, 1));
+  height: calc(9px * var(--ui-scale, 1));
+  background: #eae5ce;
+  transition: left 0.15s;
+}
+
+#boss-mode-toggle.mode-manager .boss-mode-knob {
+  left: calc(15px * var(--ui-scale, 1));
+  background: #e0aa5a;
+}
+
+
+#boss-sprite {
+  /* Size with the boss tile like the regular agent sprites (the boss frame
+   * is also a fill-mode size container), instead of a fixed 80px that didn't
+   * scale with the frame and bled out the top at high --ui-scale. Same
+   * min(…, 88cqb, 88cqi) cap keeps it inside the frame. */
+  width: min(clamp(40px, calc(min(50cqi, 55cqb) * var(--ui-scale, 1)), 240px), 88cqb, 88cqi);
+  height: min(clamp(40px, calc(min(50cqi, 55cqb) * var(--ui-scale, 1)), 240px), 88cqb, 88cqi);
+  image-rendering: pixelated;
+}
+
+#boss-thinking {
+  font-size: calc(10px * var(--ui-scale, 1));
+  color: #e0aa5a;
+  opacity: 0.6;
+}
+
+#boss-thinking:empty { display: none; }
+
+#agent-grid {
+  display: grid;
+  /* Cols/rows come from JS; default fallback in case JS hasn't run yet. */
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+  gap: 6px;
+  padding: 8px;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  /* Establish an inline-size container so agent-frame can adapt to
+     whatever width #agent-grid is given. Keep this — child rules
+     still query it. */
+  container-type: inline-size;
+  container-name: agent-grid-container;
+  /* --user-scale comes from the section's -/+ buttons (set in JS). */
+  --ui-scale: var(--user-scale, 1);
+}
+
+/* The old shape-driven modes (`narrow`, `strip`, `row`, `tall`)
+ * tried to swap the grid container's flex layout based on aspect.
+ * The new equal-share grid layout makes those obsolete — every
+ * shape gets the same fill-the-area treatment via JS-computed
+ * cols × rows. Leave the mode-specific FRAME-level tweaks in
+ * place (sprite size, padding), but stop them from changing the
+ * grid container's display / flex / wrap. */
+#agent-grid[data-grid-mode] {
+  display: grid;
+  flex-direction: initial;
+  flex-wrap: initial;
+  align-content: initial;
+  justify-content: initial;
+  overflow-x: visible;
+  overflow-y: visible;
+}
+
+/* ============================================================
+ * Tall mode — big square slot. Cards are centered vertically,
+ * sprites bloom way up, frames grow toward the available height.
+ * The 4-card-row-in-800px-tall-lane case used to pack at the top
+ * with a sea of black below; now sprites are big enough that the
+ * grid actually feels like the surface owns the space.
+ * ============================================================ */
+#agent-grid[data-grid-mode="tall"] {
+  align-content: center;
+  justify-content: center;
+  padding: 24px;
+  gap: 18px;
+}
+#agent-grid[data-grid-mode="tall"] .agent-frame canvas {
+  /* Sprite scales with the actual grid height (smooth, not stepped):
+   * 96px floor, ~28% of grid-h, 220px ceiling. So a 600px lane
+   * gives ~168px sprite, an 800px lane ~220px capped, a 480px lane
+   * ~134px. Reads as variable size, not "two discrete modes".
+   * Multiplied by --ui-scale so the −/+ buttons still scale the
+   * whole frame on top of the height-driven sizing. */
+  width: calc(clamp(96px, calc(var(--grid-h, 600px) * 0.28), 220px) * var(--ui-scale, 1));
+  height: calc(clamp(96px, calc(var(--grid-h, 600px) * 0.28), 220px) * var(--ui-scale, 1));
+}
+#agent-grid[data-grid-mode="tall"] .agent-frame {
+  max-width: calc(380px * var(--ui-scale, 1));
+  min-width: calc(220px * var(--ui-scale, 1));
+  padding: 14px 14px 36px 14px;
+}
+
+/* ============================================================
+ * Strip mode — very thin horizontal band (≤130px tall). Like a
+ * dock at the bottom of the screen. Sprite + name side by side,
+ * everything else hidden. Frames pack tightly with a small gap.
+ * ============================================================ */
+#agent-grid[data-grid-mode="strip"] {
+  padding: 6px 10px;
+  gap: 8px;
+  align-content: center;
+  justify-content: flex-start;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+#agent-grid[data-grid-mode="strip"] .agent-frame {
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 4px;
+  max-width: none;
+  min-width: 0;
+}
+#agent-grid[data-grid-mode="strip"] .agent-frame .agent-frame-inner {
+  flex-direction: row;
+  align-items: center;
+  width: auto;
+  background: transparent;
+}
+#agent-grid[data-grid-mode="strip"] .agent-frame .frame-main {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  min-width: 0;
+}
+#agent-grid[data-grid-mode="strip"] .agent-frame canvas {
+  width: calc(clamp(40px, calc(var(--grid-h, 80px) * 0.7), 90px) * var(--ui-scale, 1));
+  height: calc(clamp(40px, calc(var(--grid-h, 80px) * 0.7), 90px) * var(--ui-scale, 1));
+}
+#agent-grid[data-grid-mode="strip"] .agent-frame .creature-name {
+  font-size: 11px;
+  white-space: nowrap;
+}
+/* Hide everything except sprite + name in strip mode. */
+#agent-grid[data-grid-mode="strip"] .agent-frame .agent-level,
+#agent-grid[data-grid-mode="strip"] .agent-frame .xp-bar,
+#agent-grid[data-grid-mode="strip"] .agent-frame .agent-status,
+#agent-grid[data-grid-mode="strip"] .agent-frame .agent-stats,
+#agent-grid[data-grid-mode="strip"] .agent-frame .agent-project,
+#agent-grid[data-grid-mode="strip"] .agent-frame .agent-task,
+#agent-grid[data-grid-mode="strip"] .agent-frame .agent-branch,
+#agent-grid[data-grid-mode="strip"] .agent-frame .agent-count-badge,
+#agent-grid[data-grid-mode="strip"] .agent-frame .change-creature,
+#agent-grid[data-grid-mode="strip"] .agent-frame .frame-subs {
+  display: none;
+}
+/* The cream-checker footer collapses to a thin underline
+ * matching the strip's own height. */
+#agent-grid[data-grid-mode="strip"] .agent-frame .frame-footer {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  width: auto;
+}
+
+/* Responsive behavior across grid widths.
+ * - Wide (>560px): card grid; cards GROW to fill the row evenly so a
+ *   trailing gap on the right doesn't look sloppy. Cap at 280px so a
+ *   lone card in a fresh row doesn't blow up to full width.
+ * - Mid (380-560px): same flex-grow, smaller min-width.
+ * - Narrow (<380px): switch to a horizontal "list row" layout —
+ *   sprite on the left, name + level on the top-right line, xp-bar
+ *   on the bottom-right line. Frames stretch to full width and stack
+ *   vertically. Reads like a contact list. */
+
+/* Wide / mid: stretch cards to fill the row evenly. */
+.agent-frame {
+  flex: 1 1 auto;
+  max-width: calc(280px * var(--ui-scale, 1));
+}
+
+@container agent-grid-container (max-width: 560px) and (min-width: 380.1px) {
+  .agent-frame {
+    min-width: calc(140px * var(--ui-scale, 1));
+    max-width: calc(220px * var(--ui-scale, 1));
+  }
+}
+
+/* Row-internals layout — sprite on the left, name/level/xp-bar/branch
+ * on the right via a 3-row CSS grid. Used in two shapes:
+ *   narrow → cards take full width, one per visual row (list).
+ *   row    → cards flow side-by-side; each is internally a row.
+ * `data-grid-mode` is set by a ResizeObserver in main.ts so the same
+ * internals can fire for either container shape (a wide+short
+ * horizontal section-lane wouldn't match a max-width query). */
+#agent-grid[data-grid-mode="narrow"] .agent-frame {
+  /* Full-width list rows: one per visual row. */
+  min-width: 0;
+  width: 100%;
+  max-width: none;
+}
+
+#agent-grid[data-grid-mode="row"] .agent-frame {
+  /* Wide+short lane: cards still flow horizontally, multiple per row,
+   * but each one uses the compact row internals so they don't waste
+   * vertical space in a thin lane. The 420px max keeps a lone card
+   * from stretching the full lane while still letting 3-4 cards
+   * distribute evenly across a typical wide horizontal section. */
+  flex: 1 1 calc(240px * var(--ui-scale, 1));
+  min-width: calc(200px * var(--ui-scale, 1));
+  max-width: calc(420px * var(--ui-scale, 1));
+  /* Stretch each card to fill the section's full height instead of
+   * collapsing to content height with dead space beneath. Works in
+   * tandem with the container's `align-content: stretch` override
+   * below — needed because the default `align-content: start` packs
+   * the single wrapped line to the top of the grid. */
+  align-self: stretch;
+  height: auto;
+}
+
+/* Container-level: stretch the (single) line of cards to fill the
+ * grid's available height so the row of frames actually reaches the
+ * bottom of the section. */
+#agent-grid[data-grid-mode="row"] {
+  align-content: stretch;
+  align-items: stretch;
+}
+
+/* In row mode, scale the sprite with the actual lane height so a
+ * 200px-tall lane gets a chunky ~80px sprite instead of the same
+ * 80px as a 100px-tall lane. The clamp clips at sensible bounds.
+ * Multiplied by --ui-scale so the −/+ buttons keep working on
+ * top of the height-driven sizing. */
+#agent-grid[data-grid-mode="row"] .agent-frame canvas {
+  width: calc(clamp(40px, calc(var(--grid-h, 120px) * 0.55), 100px) * var(--ui-scale, 1));
+  height: calc(clamp(40px, calc(var(--grid-h, 120px) * 0.55), 100px) * var(--ui-scale, 1));
+}
+
+/* Shared row internals — fires for either grid mode. */
+:is(#agent-grid[data-grid-mode="narrow"], #agent-grid[data-grid-mode="row"]) .agent-frame {
+  flex-direction: row;
+  padding: 0;
+}
+:is(#agent-grid[data-grid-mode="narrow"], #agent-grid[data-grid-mode="row"]) .agent-frame .agent-frame-inner {
+  flex-direction: row;
+  width: 100%;
+}
+:is(#agent-grid[data-grid-mode="narrow"], #agent-grid[data-grid-mode="row"]) .agent-frame .frame-main {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-rows: auto auto auto;
+  column-gap: 10px;
+  row-gap: 2px;
+  align-items: center;
+  padding: 8px 12px;
+  min-width: 0;
+  width: 100%;
+  text-align: left;
+}
+/* Sprite spans all three text rows so it visually anchors the row. */
+:is(#agent-grid[data-grid-mode="narrow"], #agent-grid[data-grid-mode="row"]) .agent-frame .sprite-wrap   { grid-column: 1; grid-row: 1 / span 3; }
+:is(#agent-grid[data-grid-mode="narrow"], #agent-grid[data-grid-mode="row"]) .agent-frame .creature-name { grid-column: 2; grid-row: 1; justify-self: start; }
+:is(#agent-grid[data-grid-mode="narrow"], #agent-grid[data-grid-mode="row"]) .agent-frame .agent-level   { grid-column: 3; grid-row: 1; justify-self: end; }
+:is(#agent-grid[data-grid-mode="narrow"], #agent-grid[data-grid-mode="row"]) .agent-frame .xp-bar        { grid-column: 2 / span 2; grid-row: 2; width: 100%; }
+/* Branch on its own row underneath the xp bar — it's important
+ * context (which checkout the agent is on) and reads cleanly when
+ * it gets the full text-row width. Truncate long branches. */
+:is(#agent-grid[data-grid-mode="narrow"], #agent-grid[data-grid-mode="row"]) .agent-frame .agent-branch  {
+  grid-column: 2 / span 2;
+  grid-row: 3;
+  justify-self: start;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Hide the chatty bits in compact form. */
+:is(#agent-grid[data-grid-mode="narrow"], #agent-grid[data-grid-mode="row"]) .agent-frame .agent-status,
+:is(#agent-grid[data-grid-mode="narrow"], #agent-grid[data-grid-mode="row"]) .agent-frame .agent-stats,
+:is(#agent-grid[data-grid-mode="narrow"], #agent-grid[data-grid-mode="row"]) .agent-frame .agent-project,
+:is(#agent-grid[data-grid-mode="narrow"], #agent-grid[data-grid-mode="row"]) .agent-frame .agent-task,
+:is(#agent-grid[data-grid-mode="narrow"], #agent-grid[data-grid-mode="row"]) .agent-frame .change-creature {
+  display: none;
+}
+/* The cream-checker footer collapses to a thin strip on the right
+ * so the status accent (gold for boss, etc.) still reads. */
+:is(#agent-grid[data-grid-mode="narrow"], #agent-grid[data-grid-mode="row"]) .agent-frame .frame-footer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 4px;
+  height: auto;
+}
+/* Boss frame opt-out in narrow mode (full-width column) only — it has
+ * its own oversized layout that shouldn't collapse to list-row form.
+ * In horizontal-lane (`row`) mode the boss flows like the others. */
+#agent-grid[data-grid-mode="narrow"] .agent-frame.boss {
+  grid-column: 1 / -1;
+}
+
+.agent-frame {
+  position: relative;
+  border: none;
+  outline: none;
+  /* The checker bg lives here so it shows as a thin border around
+   * the inner dark fill. `.agent-frame.active` / `.idle` / `.done`
+   * rules override the bg with status-specific checker variants. */
+  background:
+    repeating-conic-gradient(#eae5ce 0% 25%, #2e2f38 0% 50%) 0 0 / 4px 4px;
+  padding: 4px;
+  min-width: 0;
+  min-height: 0;
+  /* Frame fills its grid cell. */
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Minimalist content: only sprite, name, and branch survive. Level
+ * chip, xp bar, status text, stats, project, sub-agent column, and
+ * the gold footer strip are all hidden in the new fill layout. The
+ * status tint on the sprite (gold pulse for working, dim for done)
+ * carries the activity signal instead. */
+.agent-frame .agent-level,
+.agent-frame .xp-bar,
+.agent-frame .agent-status,
+.agent-frame .agent-stats,
+.agent-frame .agent-project,
+.agent-frame .agent-task,
+.agent-frame .agent-count-badge,
+.agent-frame .frame-subs,
+.agent-frame .change-creature {
+  display: none;
+}
+
+.agent-frame .frame-footer {
+  display: none;
+}
+
+.agent-frame::after {
+  /* Drop the gold selected-strip — selection is shown via the
+   * frame's border-color instead (see .agent-frame.selected below). */
+  display: none;
+}
+
+.agent-frame.selected {
+  outline: 2px solid #e0aa5a;
+  outline-offset: -2px;
+}
+
+.agent-close-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 14px;
+  height: 14px;
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s;
+  z-index: 2;
+}
+
+.agent-frame:hover .agent-close-btn {
+  opacity: 0.4;
+}
+
+.agent-close-btn:hover {
+  opacity: 1 !important;
+}
+
+.agent-close-btn.confirm {
+  opacity: 1 !important;
+  color: #ff7b7b;
+}
+
+.agent-term-btn {
+  position: absolute;
+  top: 4px;
+  right: 20px;
+  width: 14px;
+  height: 14px;
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s;
+  z-index: 2;
+}
+
+.agent-frame:hover .agent-term-btn {
+  opacity: 0.4;
+}
+
+.agent-term-btn:hover {
+  opacity: 1 !important;
+}
+
+/* "Awaiting your input" indicator — the agent's tmux pane is showing
+ * a Claude Code picker / permission prompt. Instead of overlaying a
+ * badge on the creature, we recolor the creature itself: the cream
+ * pixels shift to the gold "active" tier color and pulse softly.
+ * Combined with the gold cream-checker footer below, the signal is
+ * unmistakable from a glance — and the sprite stays fully readable.
+ *
+ * The filter chain converts cream → gold while leaving the dark
+ * background pixels alone: sepia anchors the hue, saturate pushes
+ * the chroma up, hue-rotate tunes it from sepia-brown to amber. */
+.agent-frame.awaiting-choice canvas {
+  filter: sepia(1) saturate(3.2) hue-rotate(-12deg) brightness(1.05);
+  animation: agent-ask-tint 1.4s steps(2, end) infinite;
+}
+
+.agent-frame.awaiting-choice .sprite-wrap {
+  cursor: pointer;
+}
+
+@keyframes agent-ask-tint {
+  0%, 100% { filter: sepia(1) saturate(3.2) hue-rotate(-12deg) brightness(1.05); }
+  50%      { filter: sepia(1) saturate(2.0) hue-rotate(-12deg) brightness(0.85); }
+}
+
+
+.agent-frame-inner {
+  background: var(--bg);
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+  position: relative;
+  z-index: 1;
+}
+
+.frame-main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.frame-subs {
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 8px 0;
+  border-left: 1px solid #4a4840;
+  margin: 8px 0;
+}
+
+.frame-subs:not(:empty) {
+  display: flex;
+}
+
+.sub-agent {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sub-canvas {
+  width: 20px;
+  height: 20px;
+  image-rendering: pixelated;
+}
+
+.sub-label {
+  font-size: calc(8px * var(--ui-scale, 1));
+  max-width: calc(80px * var(--ui-scale, 1));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: linear-gradient(
+    90deg,
+    rgba(234, 229, 206, 0.7) 0%,
+    rgba(234, 229, 206, 0.7) 40%,
+    rgba(234, 229, 206, 1)   50%,
+    rgba(234, 229, 206, 0.7) 60%,
+    rgba(234, 229, 206, 0.7) 100%
+  );
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+          color: transparent;
+  animation: sub-shimmer 4s steps(24) infinite;
+}
+
+@keyframes sub-shimmer {
+  0%   { background-position: 150% 0; }
+  100% { background-position: -150% 0; }
+}
+
+.sub-spinner {
+  font-size: calc(14px * var(--ui-scale, 1));
+  width: calc(20px * var(--ui-scale, 1));
+  height: calc(20px * var(--ui-scale, 1));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+@keyframes think-spin {
+  0%, 19%   { content: '✦'; }
+  20%, 39%  { content: '✧'; }
+  40%, 59%  { content: '❋'; }
+  60%, 79%  { content: '✿'; }
+  80%, 100% { content: '✦'; }
+}
+
+.sub-spinner::after {
+  content: '✦';
+  animation: think-spin 2s steps(1) infinite;
+}
+
+.sprite-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.agent-frame .sprite-wrap {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.agent-frame .sprite-wrap canvas {
+  /* Sized fluidly with the TILE — 50% of the tile's inline-size or
+   * 55% of its block-size, whichever is smaller, so the sprite fits
+   * both wide-and-short and tall-and-narrow tiles without cropping.
+   * The frame itself is a size container (rule below), so cqi / cqb
+   * here resolve against the tile, not the whole grid. Multiplied by
+   * --ui-scale so the section's −/+ buttons still scale on top of
+   * the tile-driven sizing. Floor / ceiling keep it readable but
+   * never huge.
+   *
+   * The outer min(…, 88cqb, 88cqi) is a hard cap against the tile: at
+   * high --ui-scale the scaled value would otherwise exceed the tile's
+   * own height/width and the sprite would bleed out the top and bottom
+   * of the frame. Capping by both axes (same expression for w & h)
+   * keeps the sprite square and always inside the frame. */
+  width: min(clamp(40px, calc(min(50cqi, 55cqb) * var(--ui-scale, 1)), 240px), 88cqb, 88cqi);
+  height: min(clamp(40px, calc(min(50cqi, 55cqb) * var(--ui-scale, 1)), 240px), 88cqb, 88cqi);
+  image-rendering: pixelated;
+  background: var(--bg);
+}
+
+/* Each tile is its own size container so descendants can size by
+ * the TILE's width AND height (cqi + cqb), not by the grid's. Without
+ * this, `cqi` inside a tile resolved to 35% of the whole grid row,
+ * which is why sprites looked massive when the grid spanned the
+ * screen. `container-type: size` means the tile's own size is
+ * computed independent of its content — fine here because the grid
+ * cell (1fr × 1fr) is what sizes the tile, not the inner content. */
+#agent-grid[data-grid-mode="fill"] .agent-frame {
+  container-type: size;
+  container-name: agent-tile;
+  /* Undo the old wide-mode max-width cap that fought the fill grid. */
+  flex: initial;
+  max-width: none;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* Wide+short tile: when the cell is significantly wider than tall,
+ * stop stacking sprite-above-text (which would push the name past the
+ * tile's bottom) and lay them out horizontally — sprite on the left,
+ * name+branch column on the right. Uses CSS grid on .frame-main so the
+ * sprite spans both visible rows on the left and the name/branch sit
+ * stacked in the right column. Triggered against the tile's OWN size
+ * (container-type: size on .agent-frame in fill mode), so each tile
+ * picks its own orientation independent of the grid split. */
+@container agent-tile (min-aspect-ratio: 1.5) {
+  .agent-frame-inner {
+    padding: 8px 12px;
+    align-items: stretch;
+    justify-content: stretch;
+  }
+  .frame-main {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-rows: auto auto;
+    column-gap: 12px;
+    row-gap: 2px;
+    align-items: center;
+    justify-items: start;
+    width: 100%;
+    height: 100%;
+    text-align: left;
+  }
+  .agent-frame .sprite-wrap {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    align-self: center;
+  }
+  .agent-frame .creature-name {
+    grid-column: 2;
+    grid-row: 1;
+    text-align: left;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    align-self: end;
+  }
+  .agent-frame .agent-branch {
+    grid-column: 2;
+    grid-row: 2;
+    text-align: left;
+    max-width: 100%;
+    align-self: start;
+  }
+  /* Shrink sprite a bit harder when tile is squat so name has room. */
+  .agent-frame .sprite-wrap canvas {
+    width: clamp(32px, calc(min(35cqi, 75cqb) * var(--ui-scale, 1)), 200px);
+    height: clamp(32px, calc(min(35cqi, 75cqb) * var(--ui-scale, 1)), 200px);
+  }
+}
+
+/* ZzZ sleep animation for idle agents — retro stepped animation */
+.sleep-zzz {
+  position: absolute;
+  top: -2px;
+  right: -8px;
+  pointer-events: none;
+}
+
+.sleep-zzz .z {
+  position: absolute;
+  font-family: 'Gridbit', monospace;
+  color: #eae5ce;
+  opacity: 0;
+  animation: zzz-pop 3s steps(1) infinite;
+}
+
+.sleep-zzz .z1 {
+  font-size: calc(7px * var(--ui-scale, 1));
+  right: 2px;
+  top: 0;
+  animation-delay: 0s;
+}
+
+.sleep-zzz .z2 {
+  font-size: calc(9px * var(--ui-scale, 1));
+  right: -4px;
+  top: 0;
+  animation-delay: 1s;
+}
+
+.sleep-zzz .z3 {
+  font-size: calc(12px * var(--ui-scale, 1));
+  right: -10px;
+  top: 0;
+  animation-delay: 2s;
+}
+
+@keyframes zzz-pop {
+  0%   { opacity: 0; transform: translateY(0); }
+  10%  { opacity: 0.5; transform: translateY(calc(-6px * var(--ui-scale, 1))); }
+  30%  { opacity: 0.4; transform: translateY(calc(-14px * var(--ui-scale, 1))); }
+  50%  { opacity: 0.25; transform: translateY(calc(-22px * var(--ui-scale, 1))); }
+  70%  { opacity: 0; transform: translateY(calc(-28px * var(--ui-scale, 1))); }
+  100% { opacity: 0; transform: translateY(calc(-28px * var(--ui-scale, 1))); }
+}
+
+.agent-frame .change-creature {
+  font-size: calc(10px * var(--ui-scale, 1));
+  opacity: 0.3;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  transition: opacity 0.2s;
+}
+
+.agent-frame .change-creature:hover {
+  opacity: 0.8;
+}
+
+.agent-frame .frame-footer {
+  display: none;
+}
+
+@keyframes fillBar {
+  0% { width: 0%; }
+  100% { width: 100%; }
+}
+
+@keyframes dots {
+  0%, 24% { content: '.'; }
+  25%, 49% { content: '..'; }
+  50%, 100% { content: '...'; }
+}
+
+.footer-dots::after {
+  content: '.';
+  animation: dots 2.5s steps(1) infinite;
+}
+
+.agent-frame .agent-count-badge {
+  font-size: calc(9px * var(--ui-scale, 1));
+  opacity: 0.5;
+  letter-spacing: 1px;
+}
+
+.agent-frame .creature-name {
+  font-size: clamp(11px, calc(min(4.5cqi, 8cqb) * var(--ui-scale, 1)), 28px);
+  letter-spacing: 1px;
+  text-align: center;
+  margin: 0;
+  cursor: pointer;
+  /* Solid plate so the name stays legible against the checkerboard
+   * background. Inline-block + padding keeps it tight to the text. */
+  background: var(--bg);
+  padding: 2px 6px;
+  display: inline-block;
+  position: relative;
+  z-index: 1;
+}
+
+.name-spinner::after {
+  content: '✦';
+  animation: think-spin 2s steps(1) infinite;
+  font-size: calc(10px * var(--ui-scale, 1));
+  margin-left: 4px;
+}
+
+.agent-frame .creature-name:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.agent-frame .agent-level {
+  font-size: calc(12px * var(--ui-scale, 1));
+  opacity: 0.7;
+  letter-spacing: 1px;
+  margin-top: 2px;
+}
+
+.xp-bar {
+  display: flex;
+  gap: 2px;
+  width: 80%;
+}
+
+.xp-block {
+  flex: 1;
+  height: calc(4px * var(--ui-scale, 1));
+}
+
+.xp-block.filled {
+  background: #eae5ce;
+}
+
+.xp-block.empty {
+  background: #1a1b22;
+}
+
+.agent-frame .agent-status {
+  font-size: calc(9px * var(--ui-scale, 1));
+  opacity: 0.6;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  text-align: center;
+  word-break: break-word;
+  max-width: 90%;
+  margin-top: 4px;
+}
+
+.agent-frame .agent-stats {
+  font-size: calc(8px * var(--ui-scale, 1));
+  opacity: 0.4;
+  letter-spacing: 0.5px;
+}
+
+.agent-frame .agent-project {
+  font-size: calc(9px * var(--ui-scale, 1));
+  opacity: 0.4;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-frame .agent-branch {
+  font-size: clamp(9px, calc(min(2.8cqi, 4.5cqb) * var(--ui-scale, 1)), 18px);
+  opacity: 0.55;
+  letter-spacing: 0.5px;
+  text-align: center;
+  max-width: 90%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-frame .agent-branch.agent-branch-empty {
+  opacity: 0.25;
+  font-style: italic;
+}
+
+.agent-frame .agent-task {
+  font-size: 11px;
+  opacity: 0.5;
+  max-width: 210px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.agent-frame.active {
+  background:
+    repeating-conic-gradient(#eae5ce 0% 25%, #2e2f38 0% 50%) 0 0 / 4px 4px;
+}
+
+.agent-frame.idle {
+  background:
+    repeating-conic-gradient(#4a4840 0% 25%, #2e2f38 0% 50%) 0 0 / 4px 4px;
+  opacity: 0.7;
+}
+
+.agent-frame.done {
+  background:
+    repeating-conic-gradient(#3a3b32 0% 25%, #2e2f38 0% 50%) 0 0 / 4px 4px;
+  opacity: 0.45;
+}
+
+.agent-frame.done .footer-fill {
+  width: 100%;
+  animation: none;
+  background: #5a5a4a;
+}
+
+/* Selected-agent indicator — replace the bottom cream-checker
+ * strip with the same dithered pattern in gold, plus a soft gold
+ * halo above and around it. Same texture, same retro vibe; just
+ * lit up. The pseudo-element tiles the conic-gradient in 4px units
+ * exactly like the rest of the frame. */
+.agent-frame.selected::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 28px;
+  background: repeating-conic-gradient(#e0aa5a 0% 25%, #2e2f38 0% 50%) 0 0 / 4px 4px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Compact layouts: the 28px footer band dominates a short row-shaped
+ * frame (it can be a third of the frame's height in a horizontal
+ * lane). Shrink to a thin 6px stripe in narrow / row modes — same
+ * dither, same gold, just sized to the layout. */
+:is(#agent-grid[data-grid-mode="narrow"], #agent-grid[data-grid-mode="row"]) .agent-frame.selected::after {
+  height: 6px;
+}
+
+/* Agent name shimmers warm-cream while selected, mirroring the
+ * gold accent below. Subtle text-shadow keeps it pixel-readable. */
+.agent-frame.selected .creature-name {
+  color: #f0d59a;
+  text-shadow: 0 0 4px rgba(224, 170, 90, 0.55);
+}
+
+
+#top-controls {
+  position: fixed;
+  /* Top-left corner. Hidden at rest; surfaced only on hover so it
+   * doesn't compete visually with the top-left section chrome
+   * (drag handle, size buttons). ID is legacy — kept for compat
+   * with all existing CSS that targets it. */
+  top: 12px;
+  left: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+  z-index: 10;
+  /* Let clicks pass through the empty gaps between buttons so the
+   * layout chrome (drag handles, etc.) is still reachable. Children
+   * re-enable pointer events on themselves so an invisible button
+   * stays hoverable — which lets the user "find" the menu by moving
+   * the mouse into the corner. */
+  pointer-events: none;
+}
+
+#top-controls > * {
+  pointer-events: auto;
+}
+
+#top-controls:hover,
+#top-controls:focus-within {
+  opacity: 1;
+}
+
+#top-controls .control-label {
+  font-size: 9px;
+  opacity: 0.6;
+  user-select: none;
+  pointer-events: none;
+}
+
+#zoom-controls, #chat-font-controls, #music-size-controls {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+#zoom-controls span:not(.control-label),
+#chat-font-controls span:not(.control-label),
+#music-size-controls span:not(.control-label) {
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border: 1px solid #eae5ce;
+  user-select: none;
+}
+
+#zoom-controls span:not(.control-label):hover,
+#chat-font-controls span:not(.control-label):hover,
+#music-size-controls span:not(.control-label):hover {
+  background: #eae5ce;
+  color: #2e2f38;
+}
+
+#toggle-grid-pos {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+#bar-pos-btn {
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border: 1px solid #eae5ce;
+  user-select: none;
+}
+
+#bar-pos-btn:hover {
+  background: #eae5ce;
+  color: #2e2f38;
+}
+
+#toggle-solo {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  /* Button first, label after — labels sit on the RIGHT of the
+   * button now that the menu lives at the top-left of the screen. */
+  flex-direction: row-reverse;
+  justify-content: flex-end;
+}
+
+#solo-btn {
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border: 1px solid #eae5ce;
+  user-select: none;
+}
+
+#solo-btn:hover {
+  background: #eae5ce;
+  color: #2e2f38;
+}
+
+#solo-btn.active {
+  background: #eae5ce;
+  color: #2e2f38;
+}
+
+#toggle-verbose {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  /* Button first, label after — see #toggle-solo. */
+  flex-direction: row-reverse;
+  justify-content: flex-end;
+}
+
+#verbose-btn {
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border: 1px solid #eae5ce;
+  user-select: none;
+}
+
+#verbose-btn:hover {
+  background: #eae5ce;
+  color: #2e2f38;
+}
+
+#verbose-btn.active {
+  background: #eae5ce;
+  color: #2e2f38;
+}
+
+.verbose-output {
+  margin-top: 4px;
+}
+
+.verbose-tool {
+  margin: 4px 0;
+}
+
+.tool-header {
+  font-weight: 500;
+  opacity: 0.7;
+  font-size: 0.9em;
+  padding: 2px 0;
+}
+
+.tool-diff {
+  margin: 2px 0;
+  padding: 4px 8px;
+  font-size: 0.85em;
+  line-height: 1.4;
+  overflow-x: auto;
+}
+
+.diff-removed {
+  background: rgba(220, 50, 50, 0.25);
+  color: #ff9999;
+}
+
+.diff-added {
+  background: rgba(50, 180, 50, 0.25);
+  color: #99ff99;
+}
+
+.tool-command {
+  margin: 2px 0;
+  padding: 4px 8px;
+  background: #1a1b22;
+  font-size: 0.85em;
+}
+
+.verbose-result {
+  margin: 2px 0;
+  padding: 4px 8px;
+  background: #1a1b22;
+  font-size: 0.8em;
+  opacity: 0.6;
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+.verbose-thinking {
+  opacity: 0.4;
+  font-size: 0.8em;
+  margin: 4px 0;
+}
+
+.verbose-thinking pre {
+  margin: 4px 0;
+  padding: 4px 8px;
+  max-height: 150px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+.agent-frame.solo-faded {
+  opacity: 0.2;
+  transition: opacity 0.2s;
+}
+
+/* Welcome screen */
+.welcome-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 40px 20px;
+  opacity: 0.7;
+}
+
+.welcome-sprites {
+  display: flex;
+  gap: 12px;
+}
+
+.welcome-creature {
+  width: calc(30px * var(--ui-scale, 1));
+  height: calc(30px * var(--ui-scale, 1));
+  image-rendering: pixelated;
+}
+
+.welcome-title {
+  font-size: calc(16px * var(--ui-scale, 1));
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+.welcome-body {
+  font-size: calc(11px * var(--ui-scale, 1));
+  opacity: 0.6;
+  text-align: center;
+  line-height: 1.6;
+}
+
+.welcome-tips {
+  display: flex;
+  gap: 16px;
+  font-size: calc(9px * var(--ui-scale, 1));
+  opacity: 0.4;
+}
+
+
+#task-panel,
+.lane-task-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0 20px;
+  flex-shrink: 0;
+  font-family: 'JetBrains Mono', 'Menlo', monospace;
+  font-size: var(--chat-font-size, 13px);
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition:
+    max-height 280ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 220ms ease,
+    padding 220ms ease,
+    gap 220ms ease;
+}
+#task-panel[data-active="true"],
+.lane-task-panel[data-active="true"],
+#task-panel.is-visible,
+.lane-task-panel.is-visible {
+  max-height: 30vh;
+  opacity: 1;
+  padding: 6px 20px;
+  gap: 8px;
+  overflow-y: auto;
+  /* Soft cream glow on first paint, same rhythm as
+   * `lane-active-bar-pop`. */
+  animation: task-panel-pop 700ms ease-out 1;
+}
+@keyframes task-panel-pop {
+  0%   { background: rgba(234, 229, 206, 0.06); }
+  100% { background: transparent; }
+}
+
+.task-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.task-header {
+  font-weight: 500;
+  opacity: 0.9;
+  font-size: calc(var(--chat-font-size, 13px) * 0.85);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.task-header-meta {
+  opacity: 0.55;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.active-bar-time {
+  opacity: 0.5;
+  margin-left: 4px;
+  font-weight: 400;
+  /* Time numerals read better in the chat's regular mono font than
+   * the pixel display font — fixes per-character width drift in
+   * "1m 23s" style strings. */
+  font-family: 'JetBrains Mono', 'Menlo', monospace;
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+/* Live tool-activity label on the active-agents chip — sits after
+ * the elapsed-time, dimmed and ellipsised so a long Bash command
+ * or path doesn't blow out the bar. Shares the chat mono font with
+ * .active-bar-time so the two look like one piece of metadata. */
+.active-bar-tool {
+  opacity: 0.55;
+  margin-left: 6px;
+  padding-left: 6px;
+  border-left: 1px solid rgba(234, 229, 206, 0.2);
+  font-family: 'JetBrains Mono', 'Menlo', monospace;
+  font-size: 11px;
+  letter-spacing: 0;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.task-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.task-item {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  color: #eae5ce;
+  opacity: 0.85;
+}
+
+.task-box {
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+.task-item.task-in_progress {
+  opacity: 1;
+  font-weight: 500;
+}
+
+.task-item.task-in_progress .task-box {
+  opacity: 1;
+  color: #e0aa5a;
+}
+
+.task-completed-summary {
+  opacity: 0.5;
+  font-style: italic;
+  user-select: none;
+}
+
+.task-completed-summary::after {
+  content: ' ›';
+  display: inline-block;
+  transition: transform 0.15s;
+  opacity: 0.7;
+}
+
+.task-completed-summary.task-completed-expanded::after {
+  transform: rotate(90deg);
+}
+
+/* Completed milestones: rendered struck-through + dimmed so the user
+ * can see what's finished, not just a count. Hidden by default
+ * (display:none set inline); the summary toggle expands them. */
+.task-completed {
+  opacity: 0.4;
+  text-decoration: line-through;
+  text-decoration-color: rgba(234, 229, 206, 0.5);
+}
+
+.task-completed .task-box {
+  text-decoration: none;
+  opacity: 0.7;
+}
+
+/* Abandoned/skipped todos: pending on disk but worked past (a later
+ * todo is already done). Dimmed like completed but NOT struck through —
+ * they weren't finished, just bypassed. Collapsed by default. */
+.task-abandoned-summary {
+  opacity: 0.4;
+  font-style: italic;
+  user-select: none;
+}
+
+.task-abandoned-summary::after {
+  content: ' ›';
+  display: inline-block;
+  transition: transform 0.15s;
+  opacity: 0.7;
+}
+
+.task-abandoned-summary.task-abandoned-expanded::after {
+  transform: rotate(90deg);
+}
+
+.task-abandoned {
+  opacity: 0.35;
+}
+
+.task-abandoned .task-box {
+  opacity: 0.7;
+}
+
+#active-agents-bar {
+  display: none;
+  padding: 8px 20px;
+  background: var(--bg);
+  flex-shrink: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+  align-items: center;
+  gap: 12px;
+  min-height: 28px;
+  font-family: 'JetBrains Mono', 'Menlo', monospace;
+}
+
+.active-bar-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8em;
+  font-weight: 400;
+}
+
+.active-bar-agent strong {
+  font-weight: 400;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, currentColor 70%, transparent) 0%,
+    color-mix(in srgb, currentColor 70%, transparent) 40%,
+    currentColor                                      50%,
+    color-mix(in srgb, currentColor 70%, transparent) 60%,
+    color-mix(in srgb, currentColor 70%, transparent) 100%
+  );
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: sub-shimmer 4s steps(24) infinite;
+}
+
+.active-bar-sprite {
+  width: 1.4em;
+  height: 1.4em;
+  image-rendering: pixelated;
+}
+
+#chat-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 20px;
+  border-top: 1px solid #444;
+  position: relative;
+  flex-shrink: 0;
+}
+
+#autocomplete {
+  display: none;
+  position: absolute;
+  bottom: 100%;
+  left: 20px;
+  gap: 0;
+  flex-direction: column;
+  background: #23242c;
+  border: 1px solid #eae5ce;
+  padding: 4px 0;
+  z-index: 20;
+  min-width: 200px;
+}
+
+.ac-item {
+  display: block;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  color: #eae5ce;
+}
+
+.ac-item:hover, .ac-item.ac-active {
+  background: #eae5ce;
+  color: #2e2f38;
+}
+
+.ac-desc {
+  opacity: 0.5;
+  font-size: 10px;
+  margin-left: 8px;
+}
+
+.prompt {
+  display: none;
+}
+
+.chat-target-label {
+  position: absolute;
+  right: 24px;
+  bottom: 14px;
+  font-family: 'JetBrains Mono', 'Menlo', monospace;
+  font-size: 10px;
+  color: #eae5ce;
+  opacity: 0.35;
+  pointer-events: none;
+  text-transform: lowercase;
+}
+
+#chat-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: #eae5ce;
+  font-family: var(--chat-font);
+  font-size: var(--chat-font-size, 13px);
+  outline: none;
+  resize: none;
+  overflow-y: hidden;
+  min-height: 1.4em;
+  max-height: 200px;
+  line-height: 1.4;
+  padding: 0;
+}
+
+#chat-input::placeholder {
+  color: #444;
+}
+
+#boss-stop {
+  display: none;
+  cursor: pointer;
+  color: #e06a5a;
+  font-size: 14px;
+  padding: 2px 6px;
+  border: 1px solid #e06a5a;
+  border-radius: 3px;
+  opacity: 0.8;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+#boss-stop:hover {
+  opacity: 1;
+  background: #e06a5a22;
+}
+
+/* Pinned local-link bar — sits above #chat-response, below the chat tab.
+ * Surfaces the localhost URL of a dev server the selected agent started so
+ * you don't have to hunt for the port. Kept low-key (dim, small) until
+ * hovered so it reads as chrome, not chat content. */
+#chat-link-bar,
+.lane-link-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  padding: 3px 20px;
+  font-family: 'JetBrains Mono', 'Menlo', monospace;
+  font-size: calc(10px * var(--ui-scale, 1));
+  color: #eae5ce;
+  background: var(--bg);
+}
+
+/* Lane bars sit tighter to the tab and don't need the wide chat padding. */
+.lane-link-bar {
+  padding: 3px 10px;
+}
+
+/* A chip groups a link with its optional remove (×) control. */
+.chat-link-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.chat-link {
+  background: transparent;
+  border: 1px solid #555;
+  border-radius: 3px;
+  color: #eae5ce;
+  font: inherit;
+  padding: 1px 6px;
+  cursor: pointer;
+  opacity: 0.7;
+  text-transform: lowercase;
+  max-width: 40ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-link:hover {
+  opacity: 1;
+  border-color: #eae5ce;
+  background: #eae5ce18;
+}
+
+.chat-link-btn {
+  background: transparent;
+  border: none;
+  color: #eae5ce;
+  font: inherit;
+  cursor: pointer;
+  opacity: 0.4;
+  padding: 0 3px;
+  line-height: 1;
+}
+
+.chat-link-btn:hover {
+  opacity: 1;
+}
+
+.chat-link-input {
+  flex: 1;
+  min-width: 0;
+  background: #1a1b22;
+  border: 1px solid #555;
+  border-radius: 3px;
+  color: #eae5ce;
+  font: inherit;
+  padding: 1px 6px;
+  outline: none;
+}
+
+.chat-link-input:focus {
+  border-color: #eae5ce;
+}
+
+#chat-response {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 6px 20px;
+  font-family: var(--chat-font);
+  font-size: var(--chat-font-size, 13px);
+  border-top: 1px solid #333;
+  min-height: 60px;
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-msg {
+  padding: 3px 8px;
+  font-size: var(--chat-font-size, 13px);
+  line-height: 1.4;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+}
+
+.chat-msg pre {
+  background: #1a1b22;
+  padding: 4px 8px;
+  margin: 4px 0;
+  border-left: 2px solid #555;
+  overflow-x: auto;
+  white-space: pre;
+  font-family: var(--chat-font);
+}
+
+.chat-msg code {
+  background: #1a1b22;
+  padding: 1px 4px;
+  font-family: var(--chat-font);
+}
+
+.chat-msg .chat-table {
+  border-collapse: collapse;
+  margin: 6px 0;
+  max-width: 100%;
+  /* Cells manage their own wrapping; the container is pre-wrap. */
+  white-space: normal;
+}
+
+.chat-msg .chat-table th,
+.chat-msg .chat-table td {
+  border: 1px solid #444;
+  padding: 3px 8px;
+  text-align: left;
+  vertical-align: top;
+  white-space: normal;
+}
+
+.chat-msg .chat-table th {
+  color: #fff;
+  font-weight: bold;
+  background: #34353f;
+}
+
+.chat-msg .chat-table tbody tr:nth-child(even) td {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.chat-msg strong {
+  color: #fff;
+}
+
+.chat-msg .chat-agent-badge strong {
+  color: inherit;
+}
+
+.chat-image-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.chat-image-thumb {
+  width: 120px;
+  max-height: 120px;
+  object-fit: cover;
+  border: 1px solid #555;
+  border-radius: 3px;
+  image-rendering: auto;
+  cursor: pointer;
+}
+
+.image-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  cursor: pointer;
+}
+
+.image-overlay img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border: 2px solid #555;
+  border-radius: 4px;
+}
+
+.chat-user {
+  color: #eae5ce;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  margin: 2px 0;
+}
+
+.chat-user-target {
+  opacity: 0.5;
+}
+
+/* Per-message target badge — used in lane 0 (boss chat) so each
+ * scrolled-back user message shows which agent it was sent to via
+ * the agent's palette tint and an avatar-dot, not the easy-to-miss
+ * dim grey "you to X >" text. The `--target-color` custom property
+ * is set inline at render time from `agentColor(cwd)` (cream for
+ * 'boss'). */
+.chat-user-target-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--target-color, #eae5ce);
+  letter-spacing: 0.5px;
+  /* Smaller than the message body so the target name reads as a
+   * caption / prefix instead of competing with the actual content. */
+  font-size: 0.78em;
+}
+.chat-user-target-badge strong {
+  font-weight: 500;
+  color: var(--target-color, #eae5ce);
+}
+.chat-user-target-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  background: var(--target-color, #eae5ce);
+  flex: 0 0 auto;
+}
+
+.chat-boss {
+  color: #e0aa5a;
+}
+
+.chat-boss::before {
+  content: 'boss > ';
+  opacity: 0.5;
+}
+
+/* ============================================================
+   Chat bubble mode — settings → appearance → "chat bubbles".
+   Lays the chat history out like a messenger app: the user's
+   messages float right with one bubble color, the boss / agent
+   replies float left with another. Real system logs stay
+   stretched + centered so they read as separators.
+   ============================================================ */
+body.chat-bubbles .chat-msg {
+  max-width: 75%;
+  padding: 12px 18px;
+  margin: 4px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+body.chat-bubbles .chat-user {
+  align-self: flex-end;
+  /* `--bubble-*-bg` set inline by main.ts from the user's saved
+   * picker values; the rgba fallback preserves the pre-customisation
+   * look if the variables are unset. */
+  background: var(--bubble-user-bg, rgba(234, 229, 206, 0.12));
+  color: #eae5ce;
+  margin-right: 6px;
+  border-radius: 2px 2px 0 2px;
+}
+
+body.chat-bubbles .chat-boss {
+  align-self: flex-start;
+  background: var(--bubble-boss-bg, rgba(224, 170, 90, 0.14));
+  margin-left: 6px;
+  border-radius: 2px 2px 2px 0;
+}
+
+body.chat-bubbles .chat-agent {
+  align-self: flex-start;
+  background: var(--bubble-agent-bg, rgba(255, 255, 255, 0.05));
+  margin-left: 6px;
+  border-radius: 2px 2px 2px 0;
+}
+
+/* Real system log lines (no agentCwd) stay full-width + centered
+ * so they continue to read as separators / metadata, not chat. */
+body.chat-bubbles .chat-system:not(.chat-agent) {
+  align-self: stretch;
+  max-width: 100%;
+  background: transparent;
+  padding: 3px 8px;
+  opacity: 0.7;
+  text-align: center;
+}
+
+
+
+.boss-thinking::after {
+  content: '✦';
+  animation: think-spin 2s steps(1) infinite;
+  font-size: 1em;
+}
+
+/* --- Utku: the office critic --- */
+.utku-summon {
+  position: fixed;
+  right: 20px;
+  bottom: 80px;
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  z-index: 9998;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateX(40px);
+  transition: opacity 0.3s ease-out, transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  font-family: 'JetBrains Mono', 'Menlo', monospace;
+}
+
+.utku-summon.utku-in {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.utku-summon.utku-out {
+  opacity: 0;
+  transform: translateX(40px);
+  transition: opacity 0.25s ease-in, transform 0.25s ease-in;
+}
+
+.utku-sprite {
+  width: 60px;
+  height: 60px;
+  image-rendering: pixelated;
+  flex-shrink: 0;
+  animation: utku-bob 0.8s steps(1) infinite;
+}
+
+@keyframes utku-bob {
+  0%, 50% { transform: translateY(0); }
+  51%, 100% { transform: translateY(-2px); }
+}
+
+.utku-bubble {
+  background: var(--bg);
+  color: #eae5ce;
+  padding: 8px 12px;
+  border: 2px solid #eae5ce;
+  font-size: 12px;
+  white-space: nowrap;
+  position: relative;
+  margin-bottom: 12px;
+  font-weight: 500;
+  box-shadow: 3px 3px 0 #0006;
+}
+
+/* Dithered border accent using pseudo-elements */
+.utku-bubble::before {
+  content: '';
+  position: absolute;
+  right: -10px;
+  bottom: 8px;
+  width: 0;
+  height: 0;
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
+  border-left: 10px solid #eae5ce;
+}
+
+.utku-bubble::after {
+  content: '';
+  position: absolute;
+  right: -6px;
+  bottom: 10px;
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 8px solid #2e2f38;
+}
+
+.chat-agent-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.chat-agent-sprite {
+  display: inline-block;
+  width: 1.4em;
+  height: 1.4em;
+  background-color: currentColor;
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  vertical-align: middle;
+  image-rendering: pixelated;
+}
+
+/* Solo avatar mode (no name next to it) — used for the `messaged`
+ * boss event after dropping the "X is working on it" line. Bigger
+ * than the inline-with-name variant so the lone sprite still reads
+ * as a deliberate marker, not a stray glyph. */
+.chat-agent-sprite-solo {
+  width: 2em;
+  height: 2em;
+}
+
+.chat-agent-folder {
+  opacity: 0.4;
+  margin-left: 4px;
+  font-size: 0.85em;
+}
+
+.chat-sent-msg {
+  margin-top: 4px;
+  opacity: 0.7;
+  padding-left: 2px;
+}
+
+.chat-system {
+  color: #eae5ce;
+  font-style: normal;
+  font-size: calc(var(--chat-font-size, 13px) * 0.9);
+}
+
+/* Debug Panel */
+#debug-panel {
+  background: #1a1b22;
+  border-top: 1px solid #444;
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: #888;
+}
+
+#debug-header {
+  position: sticky;
+  top: 0;
+  background: #1a1b22;
+  padding: 4px 8px;
+  color: #666;
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px solid #333;
+}
+
+#debug-close {
+  cursor: pointer;
+  opacity: 0.5;
+}
+
+#debug-close:hover {
+  opacity: 1;
+}
+
+#debug-output {
+  padding: 4px 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.debug-line {
+  padding: 1px 0;
+  border-bottom: 1px solid #222;
+}
+
+.debug-line .debug-ts {
+  color: #555;
+  margin-right: 8px;
+}
+
+/* Creature Picker Modal */
+.picker-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.picker-modal {
+  border: 2px solid #eae5ce;
+  padding: 24px;
+  min-width: 400px;
+  background: var(--bg);
+}
+
+.picker-title {
+  font-size: 20px;
+  margin-bottom: 16px;
+  text-align: center;
+}
+
+.picker-grid {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+.picker-creature {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border: 2px solid #555;
+  cursor: pointer;
+}
+
+.picker-creature:hover { border-color: #eae5ce; }
+.picker-creature.selected { border-color: #eae5ce; background: #111; }
+.picker-creature-name { font-size: 14px; }
+
+.picker-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.picker-name-row label { font-size: 12px; opacity: 0.6; white-space: nowrap; }
+
+.picker-name-input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid #555;
+  color: #eae5ce;
+  font-family: 'Gridbit', 'PixelPurl', 'Courier New', monospace;
+  font-size: 14px;
+  padding: 6px 8px;
+  outline: none;
+}
+
+.picker-confirm {
+  background: #eae5ce;
+  color: #2e2f38;
+  border: none;
+  padding: 6px 16px;
+  cursor: pointer;
+  font-family: 'Gridbit', 'PixelPurl', 'Courier New', monospace;
+  font-size: 13px;
+}
+
+/* Boss sprite picker */
+.boss-sprite-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: 8px;
+  padding: 12px;
+  background: #23242c;
+  border: 1px solid #3a3b44;
+  max-height: 60vh;
+  overflow-y: auto;
+  min-width: 360px;
+}
+
+.boss-sprite-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px;
+  cursor: pointer;
+  background: var(--bg);
+  border: 2px solid transparent;
+  transition: border-color 0.1s, background 0.1s;
+}
+
+.boss-sprite-tile:hover { background: #34353f; border-color: #555; }
+.boss-sprite-tile.selected { border-color: #eae5ce; background: #34353f; }
+
+.boss-sprite-tile canvas {
+  width: 40px;
+  height: 40px;
+  image-rendering: pixelated;
+}
+
+.boss-sprite-tile-name {
+  font-size: 9px;
+  opacity: 0.5;
+  text-transform: lowercase;
+  letter-spacing: 0.5px;
+  text-align: center;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.boss-sprite-tile.selected .boss-sprite-tile-name { opacity: 1; }
+
+#settings-btn {
+  cursor: pointer;
+  user-select: none;
+  padding: 2px;
+}
+
+#settings-btn:hover {
+  opacity: 1;
+}
+
+#new-agent-btn {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+}
+
+#add-btn {
+  font-size: 14px;
+  padding: 2px 6px;
+  border: 1px solid #eae5ce;
+  user-select: none;
+  cursor: pointer;
+}
+
+#add-btn:hover {
+  background: #eae5ce;
+  color: #2e2f38;
+}
+
+#new-agent-btn.spawning {
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+#spawn-dropdown {
+  position: absolute;
+  left: 0;
+  /* Opens DOWNWARD now that #top-controls is anchored to the top
+   * of the viewport — opening up would put the menu offscreen. */
+  top: 100%;
+  margin-top: 4px;
+  min-width: 160px;
+  max-width: 280px;
+  background: var(--bg);
+  border: 1px solid #555;
+  z-index: 100;
+  font-size: 11px;
+}
+
+.spawn-dropdown-item {
+  padding: 6px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spawn-dropdown-item:hover {
+  background: #3e3f48;
+}
+
+.spawn-dropdown-item.browse {
+  opacity: 0.6;
+}
+
+.spawn-dropdown-sep {
+  height: 1px;
+  background: #555;
+  margin: 2px 0;
+}
+
+.spawn-dropdown-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  user-select: none;
+  font-size: 11px;
+}
+
+.spawn-toggle-btn {
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border: 1px solid #eae5ce;
+  user-select: none;
+  margin-left: auto;
+}
+
+.spawn-toggle-btn:hover {
+  background: #eae5ce;
+  color: #2e2f38;
+}
+
+.spawn-toggle-btn.active {
+  background: #eae5ce;
+  color: #2e2f38;
+}
+
+#settings-icon {
+  width: 18px;
+  height: 18px;
+  image-rendering: pixelated;
+}
+
+.settings-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.settings-modal {
+  border: 2px solid #eae5ce;
+  padding: 24px;
+  min-width: 320px;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.settings-title {
+  font-size: 20px;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settings-label {
+  font-size: 12px;
+  opacity: 0.6;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.settings-select {
+  background: var(--bg);
+  border: 1px solid #555;
+  color: #eae5ce;
+  font-family: 'Gridbit', 'PixelPurl', 'Courier New', monospace;
+  font-size: 13px;
+  padding: 4px 8px;
+  outline: none;
+}
+
+.settings-close {
+  text-align: center;
+  font-size: 11px;
+  opacity: 0.4;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-top: 8px;
+}
+
+.settings-close:hover {
+  opacity: 0.8;
+}
+
+.settings-section {
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  opacity: 0.4;
+  border-bottom: 1px dashed #555;
+  padding-bottom: 4px;
+  margin-top: 4px;
+}
+
+.settings-section:first-of-type {
+  margin-top: 0;
+}
+
+/* Tab bar at the top of the modal — one button per category. The
+ * active tab gets a cream underline and full opacity; inactive tabs
+ * stay dim. Click switches the tab content body below. */
+.settings-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px dashed #555;
+  margin-bottom: 4px;
+}
+.settings-tab {
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  opacity: 0.45;
+  padding: 6px 10px;
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 2px solid transparent;
+  transition: opacity 0.12s, border-color 0.12s;
+}
+.settings-tab:hover {
+  opacity: 0.8;
+}
+.settings-tab.active {
+  opacity: 1;
+  border-bottom-color: #eae5ce;
+}
+.settings-tab-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Color picker row — native <input type="color"> reskinned to match
+ * the rest of the settings UI. Sits next to a small text-input with
+ * the hex value so the user can type a precise color, plus a reset
+ * link that returns to the default. */
+.settings-color-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.settings-color-input {
+  width: 28px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid #555;
+  background: transparent;
+  cursor: pointer;
+}
+.settings-color-input::-webkit-color-swatch-wrapper { padding: 0; }
+.settings-color-input::-webkit-color-swatch { border: none; }
+.settings-color-hex {
+  background: var(--bg);
+  border: 1px solid #555;
+  color: #eae5ce;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  padding: 3px 6px;
+  width: 80px;
+  outline: none;
+}
+.settings-color-reset {
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  opacity: 0.5;
+  cursor: pointer;
+}
+.settings-color-reset:hover { opacity: 1; }
+
+.settings-toggle {
+  font-size: 14px;
+  cursor: pointer;
+  color: #888;
+  padding: 0 6px;
+  user-select: none;
+}
+
+.settings-toggle.active {
+  color: #ffd86b;
+}
+
+.settings-toggle:hover {
+  color: #eae5ce;
+}
+
+.settings-action-btn {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  cursor: pointer;
+  color: #eae5ce;
+  border: 1px solid #eae5ce;
+  padding: 3px 10px;
+  user-select: none;
+  transition: background 0.15s, color 0.15s;
+}
+
+.settings-action-btn:hover {
+  background: #eae5ce;
+  color: #2e2f38;
+}
+
+.settings-slider-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-slider {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 140px;
+  height: 4px;
+  background: #1a1b22;
+  border: 1px solid #eae5ce;
+  outline: none;
+  cursor: pointer;
+}
+
+.settings-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  background: #eae5ce;
+  border: 1px solid #2e2f38;
+  cursor: grab;
+}
+
+.settings-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  background: #eae5ce;
+  border: 1px solid #2e2f38;
+  cursor: grab;
+}
+
+.settings-slider-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: #eae5ce;
+  min-width: 18px;
+  text-align: right;
+}
+
+/* Live artwork preview for the dither row. Hidden by default and only
+ * surfaced while the user is interacting with the slider (hover on the row
+ * or keyboard focus on the input). Floats above the slider so it doesn't
+ * take permanent space in the settings dialog. */
+.settings-slider-wrap {
+  position: relative;
+}
+
+.settings-dither-preview {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  width: 128px;
+  height: 128px;
+  image-rendering: pixelated;
+  background: #1a1b22;
+  border: 1px solid #eae5ce;
+  padding: 4px;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.15s, transform 0.15s;
+  z-index: 20;
+}
+
+.settings-slider-wrap:hover .settings-dither-preview,
+.settings-slider-wrap:focus-within .settings-dither-preview {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+#image-queue {
+  display: none;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 20px 6px;
+  flex-shrink: 0;
+}
+
+.image-thumb {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  border: 1px solid #555;
+  overflow: hidden;
+  /* Whole thumb is clickable for the fullscreen preview. The cream
+   * border lights up on hover so the affordance reads. */
+  cursor: pointer;
+  transition: border-color 0.12s;
+}
+
+.image-thumb:hover {
+  border-color: #eae5ce;
+}
+
+.image-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  image-rendering: auto;
+}
+
+.image-thumb-remove {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: var(--bg);
+  color: #eae5ce;
+  font-size: 10px;
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.image-thumb:hover .image-thumb-remove {
+  opacity: 1;
+}
+
+#app.drag-over {
+  outline: 2px dashed #eae5ce;
+  outline-offset: -4px;
+}
+
+/* --- Connection state row (inside settings modal) --- */
+.settings-conn-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'Gridbit', monospace;
+  font-size: 11px;
+}
+.settings-conn-dot {
+  width: 6px;
+  height: 6px;
+  image-rendering: pixelated;
+}
+#settings-conn-row.connected .settings-conn-dot {
+  background: #5fae4c;
+  box-shadow: 0 0 0 1px #2a4e1f;
+}
+#settings-conn-row.disconnected .settings-conn-dot {
+  background: #cc4444;
+  box-shadow: 0 0 0 1px #4a1a1a;
+  animation: conn-pulse 1.2s ease-in-out infinite;
+}
+#settings-conn-row.connected .settings-conn-state {
+  color: #5fae4c;
+}
+#settings-conn-row.disconnected .settings-conn-state {
+  color: #cc4444;
+}
+@keyframes conn-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+/* Brief red flash on the chat input when the user tries to send while the
+ * websocket isn't OPEN. The message stays in the input so they can retry. */
+#chat-input.disconnected-flash {
+  animation: chat-disconnect-flash 0.8s ease-out;
+}
+@keyframes chat-disconnect-flash {
+  0%   { background: rgba(204, 68, 68, 0.6); }
+  100% { background: transparent; }
+}
+
+/* --- Hide-avatars mode ---
+ * Toggled via the "avatars" control. Hides every creature sprite across the UI
+ * (agent frames, boss, active-agents bar, chat history, sleep zzz's) without
+ * touching the layout or any other agent metadata.
+ */
+body.avatars-hidden .sprite-wrap,
+body.avatars-hidden #boss-sprite,
+body.avatars-hidden .active-bar-sprite,
+body.avatars-hidden .chat-agent-sprite,
+body.avatars-hidden .sleep-zzz {
+  display: none !important;
+}
+
+/* Minimalist agent frames — strip the cream-checker dither, the
+ * thick footer strip, and most of the metadata cruft. Just a tight
+ * card with the avatar (small) + name + level. Designed to coexist
+ * with `avatars-hidden` (then the avatar disappears too via the
+ * rule above). */
+body.agents-minimal .agent-frame {
+  background: transparent;
+  padding: 8px 10px;
+  min-width: calc(120px * var(--ui-scale, 1));
+  border: 1px solid rgba(234, 229, 206, 0.08);
+}
+body.agents-minimal .agent-frame canvas {
+  width: calc(40px * var(--ui-scale, 1));
+  height: calc(40px * var(--ui-scale, 1));
+}
+body.agents-minimal .agent-frame .frame-main {
+  padding: 0;
+  gap: 2px;
+}
+body.agents-minimal .agent-frame .agent-stats,
+body.agents-minimal .agent-frame .agent-project,
+body.agents-minimal .agent-frame .agent-task,
+body.agents-minimal .agent-frame .change-creature,
+body.agents-minimal .agent-frame .xp-bar,
+body.agents-minimal .agent-frame .agent-status,
+body.agents-minimal .agent-frame .agent-count-badge,
+body.agents-minimal .agent-frame .frame-subs,
+body.agents-minimal .agent-frame::after {
+  display: none !important;
+}
+body.agents-minimal .agent-frame.selected {
+  border-color: #e0aa5a;
+}
+body.agents-minimal .agent-frame .creature-name {
+  font-size: calc(12px * var(--ui-scale, 1));
+  letter-spacing: 1px;
+}
+body.agents-minimal .agent-frame .agent-level {
+  font-size: calc(10px * var(--ui-scale, 1));
+  opacity: 0.5;
+}
+body.agents-minimal .agent-frame .agent-branch {
+  font-size: calc(10px * var(--ui-scale, 1));
+  opacity: 0.5;
+  max-width: 90%;
+}
+
+/* --- Music bar (Spotify now-playing) --- */
+/* Full-row section that sits on the opposite edge of the agent grid.
+ * Two colors only — matches the 1-bit retro vibe of the rest of the app.
+ * --ms combines the global UI zoom with a dedicated player size control. */
+/* Default wrapper styling for the info / progress / controls cluster
+ * inside any music-bar style. Specific modes (framed, banner, frame,
+ * cover) override this to flex-direction or use absolute positioning
+ * as needed. The wrapper exists in the DOM regardless of style so
+ * one selector covers everything. */
+.music-stack {
+  display: flex;
+  flex-direction: column;
+  gap: calc(2px * var(--ms, 1));
+  min-width: 0;
+}
+
+#music-bar {
+  --ms: calc(var(--ui-scale, 1) * var(--music-scale, 1));
+  position: relative;
+  display: flex;
+  align-items: center;
+  /* Gap and vertical padding are capped so that pushing the size up past
+   * ~2x only grows the album cover, not the whitespace around it. */
+  gap: min(calc(14px * var(--ms)), 20px);
+  /* Horizontal padding matches #agent-grid so the framed player's content
+   * lines up with the agent column when both sections are visible. */
+  padding: min(calc(10px * var(--ms)), 14px) 16px;
+  background: var(--bg);
+  font-family: 'Gridbit', 'PixelPurl', monospace;
+  color: #eae5ce;
+  width: 100%;
+  /* Allow the music bar to shrink + adapt to whatever width its
+     container (a pair slot, chat lane, or full body row) gives it. */
+  container-type: inline-size;
+  container-name: music-bar-container;
+  min-width: 0;
+}
+
+/* Framed (default) layout — adapts based on whether lyrics are
+ * available for the current track:
+ *
+ *  Without lyrics:  [ cover ]   [ NOW PLAYING (centered) ]   [ controls ]
+ *  With lyrics:     [ cover ] [ info-left ]   [ lyrics-center ]   [ controls ]
+ *
+ * The no-lyrics arrangement fills the otherwise-empty middle column
+ * with the now-playing block so the bar doesn't show a yawning gap
+ * when LRCLIB has no synced lyrics for a track.
+ *
+ * Stack children are promoted into the bar's grid with
+ * `display: contents` so info / lyric / controls can pick their own
+ * columns directly. */
+#music-bar[data-style="framed"] {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: min(calc(14px * var(--ms)), 20px);
+  padding: min(calc(10px * var(--ms)), 14px) 16px;
+}
+#music-bar[data-style="framed"] > .music-artwork-wrap {
+  grid-column: 1;
+  flex: 0 0 auto;
+  align-self: center;
+  aspect-ratio: 1 / 1;
+  width: clamp(80px, 20%, 200px);
+  height: auto;
+  max-height: none;
+}
+#music-bar[data-style="framed"] > .music-stack {
+  display: contents;
+}
+
+/* Default (no lyrics): info centered in the middle column. */
+#music-bar[data-style="framed"] .music-info {
+  grid-column: 2;
+  justify-self: center;
+  align-self: center;
+  align-items: center;
+  text-align: center;
+  max-width: 100%;
+  min-width: 0;
+}
+#music-bar[data-style="framed"] .music-controls {
+  grid-column: 3;
+  justify-self: end;
+  align-self: center;
+}
+
+/* With lyrics: switch to a 4-column grid so info sits next to the
+ * cover (left-aligned) and the lyrics take the middle 1fr column. */
+#music-bar[data-style="framed"][data-has-lyrics="true"] {
+  grid-template-columns: auto auto 1fr auto;
+}
+#music-bar[data-style="framed"][data-has-lyrics="true"] .music-info {
+  grid-column: 2;
+  justify-self: start;
+  align-items: flex-start;
+  text-align: left;
+}
+#music-bar[data-style="framed"][data-has-lyrics="true"] .music-lyric {
+  grid-column: 3;
+  justify-self: center;
+  align-self: center;
+  width: max-content;
+  max-width: 100%;
+  text-align: center;
+  align-items: center;
+  max-height: calc(64px * var(--ms, 1));
+}
+#music-bar[data-style="framed"][data-has-lyrics="true"] .music-controls {
+  grid-column: 4;
+}
+
+/* VERTICAL kanban — single scroll on the body, each column sized
+ * to its content. Earlier versions split the body height across
+ * columns with `grid-auto-rows: 1fr` (locking each column to 1/N
+ * and trapping blank space inside short columns) and then tried
+ * `flex: 1 1 auto` (which shrank short columns to 0 because the
+ * total content basis exceeded the body height). Both produced
+ * the wrong feeling.
+ *
+ * The fix: let the BOARD claim at least the body's full height and
+ * grow beyond it for tall content, kill the per-column scroll, and
+ * rely on `.linear-body`'s existing `overflow-y: auto` so the entire
+ * kanban scrolls as one unit. The LAST column has `flex-grow: 1` so
+ * when total content is shorter than the body, the last column
+ * stretches down and consumes the slack instead of leaving a blank
+ * rectangle below the kanban.
+ *
+ * Selector covers BOTH the paired case (horizontally split with
+ * another section) and the in-lane case (Linear is the sole occupant
+ * of a sidebar lane and `data-paired` is therefore "false"). The
+ * horizontal board layout — which lays columns side-by-side rather
+ * than stacked — keeps its grid behavior and is intentionally
+ * excluded. */
+/* Board: flex column. `min-height: 100%` locks it to at least the
+ * body height so the last column has space to grow into; combined
+ * with `flex-shrink: 0` it grows past the body when total content
+ * is taller, and the body's existing `overflow-y: auto` turns that
+ * into a single scroll for the whole kanban. !important on the
+ * critical declarations because the base `.linear-board` rule
+ * (height: 100%, grid-auto-rows: 1fr) is still being applied by the
+ * cascade in some browsers, and the equal-rows behavior was the
+ * source of every "blank space inside a short column" complaint. */
+#linear-panel:not([data-board-layout="horizontal"]) .linear-board {
+  display: flex !important;
+  flex-direction: column !important;
+  grid-template-columns: none !important;
+  grid-template-rows: none !important;
+  grid-auto-rows: auto !important;
+  height: auto !important;
+  min-height: 100% !important;
+  flex: 0 0 auto !important;
+}
+/* Columns: content-sized, no per-column scrollbox. */
+#linear-panel:not([data-board-layout="horizontal"]) .linear-column {
+  flex: 0 0 auto !important;
+  overflow: visible !important;
+  min-height: 0 !important;
+}
+/* Last column soaks up any leftover vertical space inside the board
+ * so we never see a blank rectangle below the kanban. */
+#linear-panel:not([data-board-layout="horizontal"]) .linear-column:last-child {
+  flex: 1 0 auto !important;
+}
+
+/* Narrow column fallback: when the bar can't fit the cover + info +
+ * lyrics + controls side-by-side, drop to a vertical stack — cover on
+ * top, info / lyrics / controls below it. Distribute the four blocks
+ * through the full bar height with `space-between` so a tall column
+ * doesn't clump everything in the middle — cover hugs the top,
+ * controls hug the bottom, info + lyrics sit in between with their
+ * own generous gap. The grid layout above is the canonical look;
+ * this only kicks in when there's truly no room. */
+@container music-bar-container (max-width: 360px) {
+  #music-bar[data-style="framed"] {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: space-between;
+    gap: calc(24px * var(--ms));
+    padding: calc(20px * var(--ms)) calc(12px * var(--ms));
+  }
+  #music-bar[data-style="framed"] > .music-artwork-wrap {
+    align-self: center;
+    width: min(60%, 200px);
+    aspect-ratio: 1 / 1;
+    max-height: none;
+  }
+  #music-bar[data-style="framed"] > .music-stack {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    align-self: stretch;
+    align-items: center;
+    justify-content: space-around;
+    gap: calc(24px * var(--ms));
+  }
+  #music-bar[data-style="framed"] .music-info {
+    grid-column: auto;
+    justify-self: auto;
+    align-items: center;
+    text-align: center;
+  }
+  #music-bar[data-style="framed"] .music-lyric {
+    position: static;
+    transform: none;
+    left: auto;
+    top: auto;
+    max-width: 100%;
+    width: auto;
+  }
+  #music-bar[data-style="framed"] .music-controls {
+    grid-column: auto;
+    justify-self: center;
+    align-self: center;
+  }
+}
+
+/* "Stage" layout — JS sets `data-fit="stage"` on tall+wide slots
+ * (h ≥ 280 AND h / w ≥ 0.7 AND w > 360). The horizontal grid feels
+ * cramped here because the bar fills the lane vertically and the
+ * default flex `align-items: center` clusters the content in a thin
+ * strip at the middle, leaving most of the lane empty. The stage
+ * mode flips to a vertical layout that uses the slot the way a
+ * "now playing" panel would:
+ *
+ *   ┌────────────────────────────┐
+ *   │      big square cover      │
+ *   │                            │
+ *   │  NOW PLAYING / title /     │
+ *   │  artist (centered)         │
+ *   │                            │
+ *   │      lyrics (centered)     │
+ *   │                            │
+ *   │      ◀◀  ⏸  ▶▶             │
+ *   └────────────────────────────┘
+ *
+ * The cover is sized to a square that scales with both the slot's
+ * width and height — `min(80%, 60vh, calc(85vh - 220px))` keeps it
+ * from getting wider than the lane while leaving enough vertical
+ * room below for the info / lyrics / controls block. */
+#music-bar[data-style="framed"][data-fit="stage"] {
+  display: flex !important;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: calc(20px * var(--ms));
+  padding: calc(24px * var(--ms)) calc(20px * var(--ms));
+}
+#music-bar[data-style="framed"][data-fit="stage"] > .music-artwork-wrap {
+  align-self: center;
+  flex: 0 0 auto;
+  aspect-ratio: 1 / 1;
+  /* Square that fits 65% of the bar's width AND 65% of its height,
+   * whichever produces a smaller box (via `aspect-ratio: 1/1` +
+   * `max-height: 65%`). Cover scales with the lane shape without
+   * crowding out the info/lyrics/controls block beneath it. Floor
+   * at 120px so a tiny slot still shows a recognizable cover. */
+  width: 65%;
+  height: auto;
+  max-width: 100%;
+  max-height: 65%;
+  min-width: 120px;
+}
+#music-bar[data-style="framed"][data-fit="stage"] > .music-artwork-wrap > .music-artwork {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+#music-bar[data-style="framed"][data-fit="stage"] > .music-stack {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  align-self: stretch;
+  align-items: center;
+  justify-content: space-around;
+  gap: calc(18px * var(--ms));
+  min-height: 0;
+}
+#music-bar[data-style="framed"][data-fit="stage"] .music-info {
+  grid-column: auto;
+  justify-self: auto;
+  align-items: center;
+  text-align: center;
+  max-width: 100%;
+}
+#music-bar[data-style="framed"][data-fit="stage"] .music-title {
+  font-size: min(calc(20px * var(--ms)), 28px);
+}
+#music-bar[data-style="framed"][data-fit="stage"] .music-artist {
+  font-size: min(calc(14px * var(--ms)), 18px);
+}
+#music-bar[data-style="framed"][data-fit="stage"] .music-lyric {
+  position: static;
+  transform: none;
+  left: auto;
+  top: auto;
+  grid-column: auto;
+  justify-self: auto;
+  text-align: center;
+  max-width: 90%;
+  width: auto;
+  max-height: calc(120px * var(--ms, 1));
+}
+#music-bar[data-style="framed"][data-fit="stage"] .music-controls {
+  grid-column: auto;
+  justify-self: center;
+  align-self: center;
+  gap: calc(16px * var(--ms));
+}
+
+
+/* Banner canvas — absolute-positioned behind content, only visible in the
+ * "banner" style. Its internal resolution is low on purpose so CSS scaling
+ * blows up the 1-bit dither into chunky retro pixels. */
+.music-banner-canvas {
+  display: none;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* Banner mode: the dithered banner canvas takes the TOP region of
+ * the bar in normal flow, with the info / controls strip sitting
+ * directly below it. Previously they overlaid the banner — which
+ * looked great until controls covered the album art. The non-overlay
+ * stack keeps the cover (banner) fully visible while controls remain
+ * one tap away. */
+#music-bar[data-style="banner"] {
+  flex-direction: column;
+  align-items: stretch;
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
+
+#music-bar[data-style="banner"] .music-banner-canvas {
+  display: block;
+  /* In flow now: not absolute. Takes whatever vertical space it can
+   * grow into via flex-grow. The bar's height is set by its layout
+   * slot, so the banner gets the full slot minus the strip below. */
+  position: static;
+  inset: auto;
+  width: 100%;
+  height: auto;
+  flex: 1 1 auto;
+  min-height: calc(80px * var(--ms, 1));
+}
+
+#music-bar[data-style="banner"] .music-artwork-wrap {
+  display: none;
+}
+
+/* The .music-stack wrapper is the bottom strip in banner mode: a
+ * compact horizontal row carrying info / progress / controls. */
+#music-bar[data-style="banner"] > .music-stack {
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: center;
+  gap: calc(8px * var(--ms, 1));
+  background: var(--bg);
+  padding: calc(4px * var(--ms, 1)) calc(8px * var(--ms, 1));
+}
+#music-bar[data-style="banner"] .music-info {
+  flex-direction: row;
+  align-items: center;
+  gap: calc(6px * var(--ms, 1));
+  flex: 0 1 auto;
+  max-width: none;
+  text-align: left;
+}
+#music-bar[data-style="banner"] .music-controls {
+  margin-left: auto;
+  justify-content: flex-end;
+}
+#music-bar[data-style="banner"] .music-progress {
+  flex: 1 1 auto;
+  height: min(calc(3px * var(--ms, 1)), 5px);
+}
+
+/* Subtle retro drift: the dithered banner snaps 1px at a time along a
+ * longer wandering path, so it doesn't obviously return to its origin.
+ * `steps(1, end)` keeps the motion digital rather than interpolated,
+ * which is what gives it the old-CRT feel. The canvas is oversized
+ * enough that the drift never exposes the edge. */
+@keyframes banner-drift {
+  0%     { transform: translate(0, 0); }
+  8.33%  { transform: translate(1px, 0); }
+  16.66% { transform: translate(2px, 1px); }
+  25%    { transform: translate(3px, 2px); }
+  33.33% { transform: translate(4px, 1px); }
+  41.66% { transform: translate(5px, 0); }
+  50%    { transform: translate(5px, -1px); }
+  58.33% { transform: translate(4px, -2px); }
+  66.66% { transform: translate(3px, -3px); }
+  75%    { transform: translate(2px, -2px); }
+  83.33% { transform: translate(1px, -1px); }
+  91.66% { transform: translate(0, -1px); }
+  100%   { transform: translate(0, 0); }
+}
+
+#music-bar[data-style="banner"] .music-banner-canvas {
+  top: -6px;
+  left: -6px;
+  width: calc(100% + 12px);
+  height: calc(100% + 12px);
+  animation: banner-drift 24s steps(1, end) infinite;
+}
+
+/* --- Frame style: the player renders as a sibling agent card. It sits to
+ * the left of the boss (`order: -2` against the boss's `-1`) and matches
+ * agent frame geometry: same padding, same gap, same sprite size, and no
+ * `align-self` override so flex cross-axis stretch keeps heights aligned
+ * with the other frames in the row. */
+#music-bar[data-style="frame"] {
+  order: -2;
+  width: auto;
+  min-width: calc(180px * var(--ms, 1));
+  max-width: calc(220px * var(--ms, 1));
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  background:
+    repeating-conic-gradient(#eae5ce 0% 25%, #2e2f38 0% 50%) 0 0 / 4px 4px;
+  overflow: hidden;
+}
+
+/* Solid inner rect covers the conic checkerboard so it reads as a border. */
+#music-bar[data-style="frame"]::before {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  background: var(--bg);
+  z-index: 0;
+  pointer-events: none;
+}
+
+#music-bar[data-style="frame"] > *:not(.music-banner-canvas) {
+  position: relative;
+  z-index: 1;
+}
+
+#music-bar[data-style="frame"] .music-banner-canvas {
+  display: none;
+}
+
+#music-bar[data-style="frame"] .music-artwork-wrap {
+  margin-top: 6px;
+}
+
+#music-bar[data-style="frame"] .music-artwork {
+  width: calc(80px * var(--ms, 1));
+  height: calc(80px * var(--ms, 1));
+}
+
+#music-bar[data-style="frame"] .music-info {
+  align-items: center;
+  text-align: center;
+  max-width: 100%;
+  width: 100%;
+}
+
+#music-bar[data-style="frame"] .music-progress {
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+}
+
+#music-bar[data-style="frame"] .music-controls {
+  justify-content: center;
+  width: 100%;
+}
+
+/* Size controls hidden in frame/cover modes (the styles where music
+ * used to live nested in agent-grid), but the drag-handle stays —
+ * drag is the primary way to move sections around regardless of
+ * style, per the unified affordance pattern. */
+#music-bar[data-style="frame"] .section-size-btn,
+#music-bar[data-style="cover"] .section-size-btn {
+  display: none;
+}
+
+/* --- Cover style: no border — the dithered album cover is the entire
+ * background of the card, with the playback controls floating at the
+ * bottom as a small centered pill. Sits in the agent row. */
+#music-bar[data-style="cover"] {
+  order: -2;
+  width: auto;
+  /* Match the agent-frame size so the player tile sits flush in the
+   * row. Agent frames use `min-width: calc(180px * var(--ui-scale))`;
+   * mirror that and keep the square album-art ratio. */
+  min-width: calc(180px * var(--ui-scale, 1));
+  max-width: calc(220px * var(--ui-scale, 1));
+  aspect-ratio: 1 / 1;
+  padding: 0;
+  gap: 0;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+#music-bar[data-style="cover"]::before {
+  content: none;
+}
+
+#music-bar[data-style="cover"] .music-banner-canvas,
+#music-bar[data-style="cover"] .music-progress,
+#music-bar[data-style="cover"] .music-status {
+  display: none;
+}
+
+/* Title + artist float above the controls as a small centered pill. */
+#music-bar[data-style="cover"] .music-info {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 36px;
+  z-index: 2;
+  background: var(--bg);
+  padding: 3px 8px;
+  text-align: center;
+  align-items: center;
+  flex-direction: column;
+  gap: 0;
+  max-width: none;
+  width: auto;
+  flex-shrink: 1;
+}
+
+#music-bar[data-style="cover"] .music-title {
+  font-size: 11px;
+}
+
+#music-bar[data-style="cover"] .music-artist {
+  font-size: 9px;
+}
+
+#music-bar[data-style="cover"] .music-artwork-wrap {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: flex;
+}
+
+#music-bar[data-style="cover"] .music-artwork {
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+
+/* Floating controls: centered pill near the bottom, not a full-width bar. */
+#music-bar[data-style="cover"] .music-controls {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 8px;
+  z-index: 2;
+  background: var(--bg);
+  padding: 2px 8px;
+  gap: 8px;
+  width: auto;
+  justify-content: center;
+}
+
+.music-artwork-wrap {
+  flex-shrink: 0;
+  /* In the default framed style the artwork stretches to fill the
+   * music-bar's height while keeping its 1:1 aspect ratio, so the
+   * cover dominates whatever vertical space the layout gives it.
+   * The info / controls strip alongside stays at its natural
+   * (compact) height instead of stretching. */
+  align-self: stretch;
+  display: flex;
+  align-items: stretch;
+  aspect-ratio: 1 / 1;
+  min-width: calc(48px * var(--ms, 1));
+}
+
+.music-artwork {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* Floor on the canvas so the artwork doesn't disappear when the
+   * bar is in a tiny slot — the music-scale (--ms) drives a
+   * minimum-natural size; the bar height takes over above that. */
+  min-width: calc(48px * var(--ms, 1));
+  min-height: calc(48px * var(--ms, 1));
+  image-rendering: pixelated;
+  background: var(--bg);
+  object-fit: contain;
+}
+
+.music-info {
+  display: flex;
+  flex-direction: column;
+  gap: calc(1px * var(--ms, 1));
+  min-width: 0;
+  max-width: 40%;
+  flex-shrink: 1;
+  /* Stay vertically compact even when the music-bar is given a tall
+   * slot — the info+controls block sits centered next to the cover
+   * instead of stretching the controls strip to full height. */
+  align-self: center;
+  flex: 0 1 auto;
+}
+
+/* Text and control caps: the artwork is intentionally uncapped so making
+ * the player bigger really does make the cover bigger — text and controls
+ * stay the same size once they hit a comfortable upper bound. */
+.music-title {
+  font-size: min(calc(13px * var(--ms, 1)), 16px);
+  color: #eae5ce;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.music-artist {
+  font-size: min(calc(10px * var(--ms, 1)), 13px);
+  opacity: 0.7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.music-status {
+  font-size: min(calc(8px * var(--ms, 1)), 10px);
+  opacity: 0.35;
+  letter-spacing: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Progress bar — no border (the global `box-sizing: border-box` would
+ * collapse the 2px content area to 0 and leave only the border visible,
+ * which is exactly the "always white" bug). Dark trough, light fill.
+ * Sits in the middle of the bar between track info and playback controls. */
+.music-progress {
+  height: min(calc(3px * var(--ms, 1)), 5px);
+  background: #1a1b22;
+  flex: 1;
+  min-width: calc(60px * var(--ms, 1));
+  overflow: hidden;
+}
+
+/* Synced lyric strip: three lines stacked vertically. Previous on top (faded),
+ * current in the middle (full opacity, larger), next at the bottom (faded).
+ * Hidden by default; the framed style swaps it in for the progress bar when
+ * lyrics are available. Uses the pixel font so it reads as part of the
+ * retro UI. */
+.music-lyric {
+  display: none;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: calc(2px * var(--ms, 1));
+  padding: 0 calc(8px * var(--ms, 1));
+  color: #eae5ce;
+  font-family: 'Gridbit', 'PixelPurl', monospace;
+  letter-spacing: 1px;
+  text-align: center;
+  /* Clip anything longer than what the slot can hold so the bar's height
+   * stays stable as lyrics change. */
+  overflow: hidden;
+}
+
+.music-lyric-prev2,
+.music-lyric-prev,
+.music-lyric-current,
+.music-lyric-next,
+.music-lyric-next2 {
+  white-space: normal;
+  word-break: break-word;
+  max-width: 100%;
+}
+
+.music-lyric-prev {
+  font-size: min(calc(10px * var(--ms, 1)), 13px);
+  opacity: 0.3;
+}
+
+.music-lyric-current {
+  font-size: min(calc(13px * var(--ms, 1)), 17px);
+  opacity: 1;
+}
+
+.music-lyric-next {
+  font-size: min(calc(10px * var(--ms, 1)), 13px);
+  opacity: 0.3;
+}
+
+/* ±2 context lines: only visible in horizontal layout. CSS hides them
+ * by default to preserve the original 3-line vertical look. */
+.music-lyric-prev2,
+.music-lyric-next2 {
+  display: none;
+}
+
+/* Horizontal layout — current line is the visual anchor in the
+ * middle, with prev/next as soft side context and prev2/next2 as a
+ * faint outer edge. Wider lines than the v1 attempt so they read
+ * as full lyric phrases instead of cropped chips. */
+.music-lyric[data-layout="horizontal"] {
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: center;
+  gap: calc(18px * var(--ms, 1));
+  white-space: nowrap;
+  overflow: hidden;
+  /* Subtle fade at the panel edges so cropped lines feel intentional. */
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 40px,
+    #000 calc(100% - 40px),
+    transparent 100%
+  );
+          mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 40px,
+    #000 calc(100% - 40px),
+    transparent 100%
+  );
+}
+
+.music-lyric[data-layout="horizontal"] .music-lyric-prev2,
+.music-lyric[data-layout="horizontal"] .music-lyric-next2 {
+  display: block;
+  flex: 0 1 auto;
+  font-size: min(calc(10px * var(--ms, 1)), 13px);
+  opacity: 0.2;
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.music-lyric[data-layout="horizontal"] .music-lyric-prev,
+.music-lyric[data-layout="horizontal"] .music-lyric-next {
+  flex: 0 1 auto;
+  font-size: min(calc(11px * var(--ms, 1)), 14px);
+  opacity: 0.45;
+  max-width: 30ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.music-lyric[data-layout="horizontal"] .music-lyric-current {
+  flex: 0 0 auto;
+  font-size: min(calc(15px * var(--ms, 1)), 19px);
+  opacity: 1;
+  letter-spacing: 1px;
+  max-width: 50ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
+/* Lyrics-layout toggle — joins the hover-revealed chrome at the
+ * bar's top-right corner alongside the layout leaf's × and drag
+ * handle. Hidden by default; fades in only when the user is
+ * hovering the bar so it doesn't clutter the resting state.
+ * Positioned to the LEFT of the leaf-close button (which sits at
+ * right: 22px) so the three controls line up cleanly. */
+#music-bar > .music-lyrics-layout-btn {
+  position: absolute;
+  top: 4px;
+  right: 40px;
+  z-index: 20;
+  width: 16px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  line-height: 1;
+  color: #6a6b76;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease;
+  user-select: none;
+}
+.layout-leaf:hover #music-bar > .music-lyrics-layout-btn,
+#music-bar:hover > .music-lyrics-layout-btn {
+  opacity: 1;
+}
+#music-bar > .music-lyrics-layout-btn:hover {
+  color: #eae5ce;
+}
+
+/* Style-cycle button — rotates through the four player layouts.
+ * Sits LEFT of the lyrics-layout toggle (which is at right: 40px)
+ * so the cluster reads `[ ▦ ] [ ↔ ] [ × ] [ ⋮⋮ ]` in the top-right
+ * corner. Hover-gated same as its sibling so the resting bar stays
+ * clean. */
+#music-bar > .music-style-cycle-btn {
+  position: absolute;
+  top: 4px;
+  right: 60px;
+  z-index: 20;
+  width: 16px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  line-height: 1;
+  color: #6a6b76;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease;
+  user-select: none;
+}
+.layout-leaf:hover #music-bar > .music-style-cycle-btn,
+#music-bar:hover > .music-style-cycle-btn {
+  opacity: 1;
+}
+#music-bar > .music-style-cycle-btn:hover {
+  color: #eae5ce;
+}
+
+#music-bar[data-style="framed"][data-has-lyrics="true"] .music-progress {
+  display: none;
+}
+
+#music-bar[data-style="framed"][data-has-lyrics="true"] .music-lyric {
+  display: flex;
+  /* Matches the artwork height so the bar never grows when lyrics swap in
+   * or a long line wraps — anything over is clipped. */
+  max-height: calc(48px * var(--ms, 1));
+}
+
+
+.music-progress-fill {
+  height: 100%;
+  background: #eae5ce;
+  width: 0%;
+  transition: width 0.8s linear;
+}
+
+.music-controls {
+  display: flex;
+  gap: min(calc(10px * var(--ms, 1)), 14px);
+  align-items: center;
+  flex-shrink: 0;
+  /* Match .music-info: stay vertically compact when the bar is given
+   * a tall slot. Without this the controls row stretches to full
+   * height and the play/pause buttons drift apart from the title. */
+  align-self: center;
+  flex: 0 0 auto;
+}
+
+.music-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.15s;
+  user-select: none;
+  padding: min(calc(2px * var(--ms, 1)), 3px) min(calc(4px * var(--ms, 1)), 6px);
+}
+
+.music-btn:hover {
+  opacity: 1;
+}
+
+.music-btn.music-play {
+  opacity: 0.9;
+}
+
+.music-btn-icon {
+  display: block;
+  width: 18px;
+  height: 18px;
+  image-rendering: pixelated;
+}
+
+.music-btn.music-play .music-btn-icon {
+  width: 22px;
+  height: 22px;
+}
+
+/* --- Draggable sections --- */
+/* Draggable sections host a small grip handle in their top-right corner.
+ * The handle is kept ghosted until you hover the section, so it doesn't
+ * compete with content for attention. */
+#agent-grid,
+#music-bar,
+#active-agents-bar {
+  position: relative;
+}
+
+.section-drag-handle {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  width: 10px;
+  height: 14px;
+  display: grid;
+  grid-template-columns: 2px 2px;
+  grid-template-rows: repeat(3, 2px);
+  gap: 2px;
+  align-content: center;
+  justify-content: center;
+  /* Drag is the primary way to move / pair / detach sections. The
+     handle stays clearly visible at all times so users always know
+     where to grab. Brighter on hover. */
+  opacity: 0.6;
+  cursor: grab;
+  transition: opacity 0.15s;
+  z-index: 5;
+}
+
+.section-drag-handle span {
+  width: 2px;
+  height: 2px;
+  background: #eae5ce;
+  display: block;
+}
+
+#agent-grid:hover .section-drag-handle,
+#music-bar:hover .section-drag-handle,
+#active-agents-bar:hover .section-drag-handle,
+#linear-panel:hover .section-drag-handle {
+  opacity: 0.85;
+}
+
+.section-drag-handle:hover {
+  opacity: 0.9 !important;
+  cursor: grabbing;
+}
+
+.section-dragging {
+  opacity: 0.4;
+}
+
+#section-drop-indicator {
+  height: 2px;
+  background: #eae5ce;
+  margin: 0;
+  pointer-events: none;
+  flex-shrink: 0;
+}
+
+/* Per-section size controls. Live in the top-LEFT corner of the section
+ * so they stay clear of the layout chrome (drag handle + × close button)
+ * which clusters in the top-right. Same fade behavior as the chrome:
+ * invisible by default, ghosted on section hover, full on self-hover.
+ * Squared frame matches the look of the top-bar zoom / font buttons so
+ * the mental model is the same. */
+.section-size-btn {
+  position: absolute;
+  top: 4px;
+  padding: 1px 5px;
+  line-height: 1;
+  text-align: center;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #eae5ce;
+  border: 1px solid #eae5ce;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+  user-select: none;
+  /* Above #top-controls (z:10) so the buttons stay reachable even for
+   * sections that sit under the fixed top-right overlay. */
+  z-index: 15;
+}
+
+.section-size-minus { left: 4px; }
+.section-size-plus { left: 28px; }
+
+#agent-grid:hover .section-size-btn,
+#music-bar:hover .section-size-btn,
+#active-agents-bar:hover .section-size-btn,
+#linear-panel:hover .section-size-btn {
+  opacity: 0.25;
+}
+
+.section-size-btn:hover {
+  opacity: 1 !important;
+  background: #eae5ce;
+  color: #2e2f38;
+}
+
+
+
+/* ============================================================
+   Linear panel — assigned-tickets kanban. Mirrors the retro
+   1-bit aesthetic used elsewhere: dark bg, cream foreground,
+   dashed borders and pixel fonts. Supports dock-right via the
+   #agent-dock-row wrapper (created at runtime in linear.ts).
+   ============================================================ */
+
+#linear-panel {
+  --linear-scale: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: #eae5ce;
+  padding: calc(10px * var(--linear-scale));
+  margin-top: 12px;
+  font-family: 'Gridbit', 'PixelPurl', 'Courier New', monospace;
+  font-size: calc(12px * var(--linear-scale));
+  min-height: calc(120px * var(--linear-scale));
+  /* When undocked, the panel sits as a flex child of #app alongside
+   * #chat-lanes (which uses `flex: 1 1 auto`). Without an explicit
+   * shrink override, #linear-panel was getting squeezed under
+   * vertical pressure and effectively disappearing. Pin it to its
+   * content height with a sensible cap so the panel always renders
+   * its full board without dominating the chat area. */
+  flex: 0 0 auto;
+  max-height: 60vh;
+  overflow: hidden;
+}
+
+/* The body inside the undocked panel handles vertical overflow when
+ * there are many tickets, so the panel itself can stay capped. */
+#linear-panel:not([data-paired="true"]) .linear-body {
+  overflow-y: auto;
+}
+
+/* Section-pair primitive — generic body-attached side-by-side dock.
+   Replaces the old #agent-dock-row special case. */
+.section-pair {
+  display: flex;
+  flex-direction: row;
+  gap: 0;
+  width: 100%;
+  /* Parent layout (#app) decides margins; pair just packs members. */
+  position: relative;
+}
+
+.section-pair[data-orientation="vertical"] {
+  flex-direction: column;
+  /* Vertical pair needs a defined height for flex-grow ratios to
+     distribute. In #app's flex-column, this lets the wrapper take
+     available vertical space; min-height: 0 lets children shrink. */
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.section-pair > [id] {
+  /* Members are flex children; section-pair.ts sets per-member
+     flex-grow via the split fraction. flex-basis: 0 lets grow do
+     its job without natural-content reservation. */
+  min-width: 0;
+  min-height: 0;
+}
+
+.section-pair-divider {
+  flex: 0 0 8px;
+  align-self: stretch;
+  cursor: col-resize;
+  background: transparent;
+  border-left: 1px solid #3a3b46;
+  border-right: 1px solid #3a3b46;
+  transition: background 120ms ease;
+}
+/* Vertical pair → divider becomes horizontal (row resize). */
+.section-pair[data-orientation="vertical"] > .section-pair-divider {
+  cursor: row-resize;
+  border-left: none;
+  border-right: none;
+  border-top: 1px solid #3a3b46;
+  border-bottom: 1px solid #3a3b46;
+}
+.section-pair-divider:hover { background: rgba(234, 229, 206, 0.08); }
+body.section-pair-resizing { user-select: none; }
+body.section-pair-resizing[data-pair-resize-axis="horizontal"],
+body.section-pair-resizing[data-pair-resize-axis="horizontal"] * {
+  cursor: col-resize !important;
+}
+body.section-pair-resizing[data-pair-resize-axis="vertical"],
+body.section-pair-resizing[data-pair-resize-axis="vertical"] * {
+  cursor: row-resize !important;
+}
+.section-pair-divider {
+  position: relative;
+}
+
+.section-pair.section-pair-leaving {
+  outline: 1px dashed rgba(234, 229, 206, 0.4);
+  outline-offset: -2px;
+  opacity: 0.85;
+  transition: opacity 120ms ease, outline-color 120ms ease;
+}
+
+/* Drag-to-dock highlights — 3px cream bar on the matched edge.
+   Position INSIDE the target's rect (offset 0) so the bar stays
+   visible even when the target uses `overflow: hidden` (e.g.
+   #linear-panel). Left/right → vertical bar (horizontal pair).
+   Top/bottom → horizontal bar (vertical pair). */
+.section-dock-target-left,
+.section-dock-target-right,
+.section-dock-target-top,
+.section-dock-target-bottom {
+  position: relative;
+}
+.section-dock-target-left::before,
+.section-dock-target-right::before,
+.section-dock-target-top::before,
+.section-dock-target-bottom::before {
+  content: "";
+  position: absolute;
+  background: #eae5ce;
+  box-shadow: 0 0 6px rgba(234, 229, 206, 0.6);
+  animation: section-dock-pulse 800ms ease-in-out infinite;
+  pointer-events: none;
+  z-index: 50;
+}
+.section-dock-target-left::before,
+.section-dock-target-right::before {
+  top: 0;
+  bottom: 0;
+  width: 3px;
+}
+.section-dock-target-top::before,
+.section-dock-target-bottom::before {
+  left: 0;
+  right: 0;
+  height: 3px;
+}
+.section-dock-target-left::before   { left: 0; }
+.section-dock-target-right::before  { right: 0; }
+.section-dock-target-top::before    { top: 0; }
+.section-dock-target-bottom::before { bottom: 0; }
+@keyframes section-dock-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}
+
+/* When docked, the panel is a flex sibling of #agent-grid inside
+ * #agent-dock-row. Width stays bounded so the grid doesn't
+ * collapse on narrow viewports. */
+#agent-dock-row {
+  display: flex;
+  /* Stretch both children to the row's full height so their top
+   * AND bottom edges land on the same Y. Combined with zeroed
+   * top/bottom padding on the agent-grid below, a horizontal line
+   * traced across either edge of the dock hits both items. */
+  align-items: stretch;
+  gap: 12px;
+}
+
+#agent-dock-row > #agent-grid {
+  flex: 1 1 auto;
+  min-width: 0;
+  /* Zero top + bottom padding so the avatar frame's visible top
+   * and bottom edges sit at the same Y as the Linear panel's
+   * border. Side padding stays for horizontal breathing room.
+   * The dock-row's own 12px padding-bottom keeps both clear of
+   * what's below. */
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+#linear-panel[data-paired="true"] {
+  margin-top: 0;
+  /* Default until section-pair's applySplit runs; inline flex-grow /
+   * flex-shrink / flex-basis longhand from applySplit overrides this
+   * shorthand so the divider's drag actually moves things. */
+  flex: 1 1 calc(420px * var(--linear-scale));
+  min-width: 280px;
+  min-height: 0;
+  /* Drop the unpaired 60vh cap so the divider drag has room — when
+   * paired, the wrapper decides Linear's size, not the viewport. */
+  max-height: none;
+  align-self: stretch;
+  overflow: hidden;
+}
+
+/* Let the body scroll so an unusually tall column doesn't push the panel
+ * out of the row. The body's height is already constrained by the flex
+ * chain (panel `flex: 1 1 0`, body `flex: 1 1 auto`) so it fills the
+ * lane / pair wrapper exactly. No viewport-relative cap needed — that
+ * was creating a hard ceiling below the actual lane height and leaving
+ * a blank rectangle at the bottom of the panel. */
+#linear-panel[data-paired="true"] .linear-body {
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: none;
+}
+
+.linear-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: calc(8px * var(--linear-scale));
+  padding-bottom: calc(6px * var(--linear-scale));
+  border-bottom: 1px dashed #555;
+}
+
+.linear-title {
+  font-size: calc(11px * var(--linear-scale));
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.linear-refresh {
+  cursor: pointer;
+  user-select: none;
+  opacity: 0.5;
+  font-size: calc(14px * var(--linear-scale));
+  padding: 0 6px;
+}
+
+.linear-refresh:hover {
+  opacity: 1;
+}
+
+.linear-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  /* Allow the body to shrink below its content size inside a flex
+   * parent — without min-height: 0, flex children refuse to shrink
+   * and the panel grows to fit all cards instead of scrolling. */
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Board: the kanban grid. In every layout we want the board to FILL
+ * the body and split that height equally among rows so the last
+ * column doesn't float with empty space below. Cards that overflow
+ * a column scroll *inside the column* instead of pushing the body
+ * into one giant scroll. This applies to:
+ *   - Unpaired wide (multi-column auto-fit row)
+ *   - Paired vertical (1fr columns → N rows stacked)
+ *   - Paired horizontal (auto-fit narrow columns)
+ * `height: 100%` gives the grid a definite parent size so
+ * `grid-auto-rows: 1fr` can actually divide rather than collapse
+ * to content height. */
+.linear-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(calc(360px * var(--linear-scale)), 1fr));
+  gap: calc(10px * var(--linear-scale));
+  height: 100%;
+  min-height: 0;
+  grid-auto-rows: 1fr;
+  align-content: stretch;
+}
+
+/* Every column shrinks to its row's track size and scrolls its own
+ * card list. `min-height: 0` is the magic that lets a flex column
+ * shrink under its content; without it the column would balloon to
+ * fit all cards and the row height would stretch with it. */
+.linear-column {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+#linear-panel[data-paired="true"] .linear-board {
+  grid-template-columns: 1fr;
+}
+
+/* Horizontal docked layout — columns side-by-side instead of stacked.
+ * Overrides the single-column default above. The body gets
+ * horizontal overflow so narrow panels scroll instead of crushing. */
+#linear-panel[data-paired="true"][data-board-layout="horizontal"] .linear-board {
+  grid-template-columns: repeat(auto-fit, minmax(calc(170px * var(--linear-scale)), 1fr));
+}
+
+#linear-panel[data-paired="true"][data-board-layout="horizontal"] .linear-body {
+  overflow-x: auto;
+}
+
+/* Layout-toggle button — leftmost in the action strip (after cards-fewer). */
+.linear-layout-btn {
+  right: calc(var(--chrome-reserve, 50px) + 96px);
+  font-size: 13px;
+}
+
+#linear-panel:not([data-paired="true"]) .linear-layout-btn {
+  display: none;
+}
+
+.linear-column {
+  display: flex;
+  flex-direction: column;
+  gap: calc(6px * var(--linear-scale));
+}
+
+.linear-column-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding-bottom: calc(4px * var(--linear-scale));
+  border-bottom: 1px dotted #555;
+  margin-bottom: calc(2px * var(--linear-scale));
+}
+
+.linear-column-label {
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: calc(10px * var(--linear-scale));
+  opacity: 0.6;
+}
+
+.linear-column-count {
+  font-size: calc(10px * var(--linear-scale));
+  opacity: 0.35;
+}
+
+/* ============================================================
+ * Compact mode — panel is too short for cards (h ≤ 110). Show
+ * just the column header strip with a count chip; hide cards
+ * entirely so the panel still reads as "TODO 12 / IN PROGRESS 5
+ * / DONE 0" instead of cramming half-cropped half-rendered
+ * cards into a 50px slot. The count chip stays bright (the
+ * default 0.35 opacity reads fine when surrounded by cards
+ * but disappears in the compact strip — bump it up). Driven
+ * by the JS-set data-fit attribute on #linear-panel.
+ * ============================================================ */
+/* ============================================================
+ * Mini mode — short slot (h ≤ 220). Cards stay visible but title
+ * clamps to 1 line so 2-3 fit per column. Avoids the squashed
+ * look where 4+ cards try to share 100px. Beyond this, the
+ * .linear-body itself scrolls (overflow-y: auto) so the kanban
+ * never collapses to header-only.
+ * ============================================================ */
+#linear-panel[data-fit="mini"] .linear-card {
+  padding: 4px 6px;
+}
+#linear-panel[data-fit="mini"] .linear-card-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+.linear-card {
+  display: flex;
+  align-items: flex-start;
+  gap: calc(6px * var(--linear-scale));
+  padding: calc(6px * var(--linear-scale)) calc(8px * var(--linear-scale));
+  background: #25262e;
+  border: 1px solid #3a3b45;
+  cursor: pointer;
+  transition: border-color 0.1s, transform 0.1s;
+  min-width: 0;
+}
+
+.linear-card:hover {
+  border-color: #eae5ce;
+  background: #2a2b34;
+}
+
+.linear-card-id {
+  font-size: calc(10px * var(--linear-scale));
+  opacity: 0.45;
+  flex: 0 0 auto;
+  letter-spacing: 1px;
+}
+
+.linear-card-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: calc(12px * var(--linear-scale));
+  line-height: 1.3;
+  /* Let titles wrap to as many lines as they need. The column has
+   * generous vertical space and a "show more" toggle below caps the
+   * total card count, so individual cards growing taller for a long
+   * title is fine — better than `…` truncation eating real
+   * information. break-word handles overlong unbreakable tokens
+   * (URLs, identifiers) gracefully. */
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.linear-card-priority {
+  flex: 0 0 auto;
+  font-size: calc(9px * var(--linear-scale));
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 1px 5px;
+  border: 1px solid #555;
+  opacity: 0.6;
+}
+
+.linear-card-priority[data-priority="urgent"] { color: #ff6b6b; border-color: #7a3a3a; opacity: 1; }
+.linear-card-priority[data-priority="high"]   { color: #ffd86b; border-color: #7a6b3a; opacity: 0.9; }
+.linear-card-priority[data-priority="med"]    { opacity: 0.55; }
+.linear-card-priority[data-priority="low"]    { opacity: 0.35; }
+
+.linear-empty {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: calc(10px * var(--linear-scale));
+  padding: calc(12px * var(--linear-scale)) 0;
+  opacity: 0.8;
+}
+
+.linear-empty-sprite {
+  width: calc(48px * var(--linear-scale));
+  height: calc(48px * var(--linear-scale));
+  image-rendering: pixelated;
+  opacity: 0.7;
+}
+
+.linear-empty-text {
+  font-size: calc(11px * var(--linear-scale));
+  letter-spacing: 1px;
+  opacity: 0.6;
+}
+
+.linear-error {
+  flex: 1 1 auto;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: calc(12px * var(--linear-scale)) 0;
+}
+
+.linear-error-msg {
+  font-size: calc(11px * var(--linear-scale));
+  opacity: 0.7;
+  text-align: center;
+  max-width: 32ch;
+}
+
+/* Settings: password-style input and "get" link next to the label. */
+.settings-input {
+  background: var(--bg);
+  border: 1px solid #555;
+  color: #eae5ce;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  padding: 4px 8px;
+  outline: none;
+  width: 240px;
+  max-width: 60%;
+}
+
+.settings-input:focus {
+  border-color: #eae5ce;
+}
+
+.settings-label-link {
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  opacity: 0.5;
+  margin-left: 8px;
+  color: #eae5ce;
+  text-decoration: none;
+  border-bottom: 1px dotted #555;
+}
+
+.settings-label-link:hover {
+  opacity: 1;
+  border-bottom-color: #eae5ce;
+}
+
+/* ============================================================
+   Linear panel v2 — hover-revealed controls, docked tightness,
+   drag-drop visuals, card action menu.
+   ============================================================ */
+
+/* Hover-revealed control buttons on the panel. Match the spacing
+ * and styling of .section-size-btn (- / +) so the full strip
+ * reads as one row. Offsets go: reload (76), dock (52), - (28),
+ * + (4) — right-to-left in CSS terms. */
+.linear-hover-btn {
+  position: absolute;
+  top: 4px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+  opacity: 0;
+  color: #eae5ce;
+  transition: opacity 0.15s, background 0.1s, color 0.1s;
+  z-index: 15;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Section actions live on a single row at the top-right, anchored
+ * right: var(--chrome-reserve) so they sit just LEFT of the layout
+ * chrome (drag handle + × close) which the wrapper pins at the
+ * extreme right. The reserve is defined once on .layout-leaf so any
+ * section action strip uses the same gutter automatically.
+ *
+ * Linear's hover strip, left → right: layout-toggle, cards-fewer,
+ * cards-more, new, reload. */
+.linear-reload-btn      { right: calc(var(--chrome-reserve, 50px) +   0px); }
+.linear-new-btn         { right: calc(var(--chrome-reserve, 50px) +  24px); font-size: 16px; line-height: 16px; }
+.linear-cards-more-btn  { right: calc(var(--chrome-reserve, 50px) +  48px); }
+.linear-cards-fewer-btn { right: calc(var(--chrome-reserve, 50px) +  72px); }
+
+/* The cards-per-column tuners only matter while docked — undocked all
+ * cards render. Keep them out of the strip when irrelevant. */
+#linear-panel:not([data-paired="true"]) .linear-cards-fewer-btn,
+#linear-panel:not([data-paired="true"]) .linear-cards-more-btn {
+  display: none;
+}
+
+/* Brief highlight flash after a hover-strip button fires its action. */
+@keyframes linear-hover-btn-fire {
+  0%   { background: #eae5ce; color: #2e2f38; opacity: 1; }
+  100% { background: transparent; opacity: 0.25; }
+}
+
+.linear-hover-btn.linear-hover-btn-fired {
+  animation: linear-hover-btn-fire 0.7s ease-out 1;
+}
+
+#linear-panel:hover .linear-hover-btn {
+  opacity: 0.25;
+}
+
+.linear-hover-btn:hover {
+  opacity: 1 !important;
+  background: #eae5ce;
+  color: #2e2f38;
+}
+
+/* Give the docked panel a bit of breathing room from the viewport edge
+ * so it doesn't feel cropped. Padding-right so the panel isn't flush
+ * with the scrollbar; padding-bottom so its border isn't flush with the
+ * chat area below. */
+#agent-dock-row {
+  padding-right: 16px;
+  padding-bottom: 12px;
+  position: relative;
+}
+
+/* When docked, both children are in agent-dock-row. Hide their
+ * individual drag handles so the user can't accidentally yank one out
+ * of the row (that was the source of the "board gets faded" bug — a
+ * cancelled section-drag leaves .section-dragging on the child). The
+ * row itself is draggable via its own handle. */
+#agent-dock-row > #agent-grid > .section-drag-handle,
+#agent-dock-row > #linear-panel > .section-drag-handle {
+  display: none !important;
+}
+
+/* The row's own drag handle. Default fade-in mirrors siblings, but
+ * the dock-row's handle sits in the row's top-left padding (above
+ * the grid/panel) so it's easy to miss. Always faintly visible so
+ * the user can find it, with a fuller fade-in on hover. */
+#agent-dock-row > .section-drag-handle {
+  opacity: 0.25;
+  /* Larger hit area than other section handles — moving the whole
+   * dock row is a bigger gesture and benefits from a chunkier grip. */
+  width: 14px;
+  height: 18px;
+  grid-template-rows: repeat(4, 2px);
+}
+#agent-dock-row:hover > .section-drag-handle {
+  opacity: 0.6;
+}
+#agent-dock-row > .section-drag-handle:hover {
+  opacity: 1 !important;
+}
+
+
+/* Drag-drop feedback */
+.linear-card.dragging {
+  opacity: 0.4;
+  cursor: grabbing;
+}
+
+.linear-column.drop-target {
+  background: rgba(234, 229, 206, 0.05);
+  outline: 1px dashed #eae5ce;
+  outline-offset: -2px;
+}
+
+/* "+N more" footer at the bottom of a capped column. */
+.linear-column-more {
+  font-size: calc(10px * var(--linear-scale));
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  opacity: 0.45;
+  cursor: pointer;
+  padding: calc(4px * var(--linear-scale)) 0;
+  text-align: center;
+  border-top: 1px dotted #3a3b45;
+  margin-top: calc(2px * var(--linear-scale));
+}
+
+.linear-column-more:hover {
+  opacity: 0.9;
+}
+
+/* Card action menu (on tap) */
+.linear-menu {
+  position: fixed;
+  min-width: 200px;
+  background: var(--bg);
+  border: 1px solid #eae5ce;
+  padding: 4px;
+  z-index: 1000;
+  font-family: 'Gridbit', 'PixelPurl', 'Courier New', monospace;
+  box-shadow: 4px 4px 0 #000;
+}
+
+.linear-menu-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.linear-menu-item:hover:not(.disabled) {
+  background: #eae5ce;
+  color: #2e2f38;
+}
+
+.linear-menu-item.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.linear-menu-label {
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 11px;
+}
+
+.linear-menu-hint {
+  font-size: 10px;
+  opacity: 0.55;
+  font-style: italic;
+}
+
+.linear-menu-item:hover:not(.disabled) .linear-menu-hint {
+  opacity: 0.8;
+}
+
+/* Resize handle on the docked panel's left edge. Hidden when undocked.
+ * Kept narrow and subtle — the hit area extends beyond the visible line
+ * via padding so the user doesn't have to pixel-hunt. */
+.linear-resize-handle {
+  display: none;
+  position: absolute;
+  top: 0;
+  left: -4px;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 14;
+}
+
+#linear-panel[data-paired="true"] .linear-resize-handle {
+  display: block;
+}
+
+.linear-resize-handle::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background: #3a3b45;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.linear-resize-handle:hover::before,
+body.linear-resizing .linear-resize-handle::before {
+  opacity: 1;
+  background: #eae5ce;
+}
+
+/* Freeze the cursor + kill text selection while dragging. */
+body.linear-resizing {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
+body.linear-resizing * {
+  cursor: col-resize !important;
+}
+
+/* ============================================================
+   Linear card feedback states
+   - sending:   brief cream border pulse right after send-to-agent
+   - working:   slow, low-contrast background shimmer while an agent
+                is on the ticket (30 min window)
+   - changed:   brief background flash when a poll detects a move
+   All three stay within the existing #eae5ce / #2e2f38 palette so
+   they feel like the rest of the UI, not like toast notifications.
+   ============================================================ */
+
+@keyframes linear-card-sending-pulse {
+  0%   { border-color: #eae5ce; box-shadow: 0 0 0 0 rgba(234, 229, 206, 0.5); }
+  50%  { border-color: #eae5ce; box-shadow: 0 0 0 3px rgba(234, 229, 206, 0.15); }
+  100% { border-color: #3a3b45; box-shadow: 0 0 0 0 rgba(234, 229, 206, 0); }
+}
+
+.linear-card.linear-card-sending {
+  animation: linear-card-sending-pulse 2.2s ease-out 1;
+}
+
+/* Working shimmer: a faint cream wash that drifts left-to-right across
+ * the card. The gradient stops are weighted so the highlight is thin
+ * and the rest of the card barely shifts — enough to read as "alive"
+ * without being noisy. */
+@keyframes linear-card-working-shimmer {
+  0%   { background-position: -120% 0; }
+  100% { background-position: 220% 0; }
+}
+
+.linear-card.linear-card-working {
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    transparent 42%,
+    rgba(234, 229, 206, 0.08) 50%,
+    transparent 58%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  background-position: -120% 0;
+  animation: linear-card-working-shimmer 3.2s linear infinite;
+  border-left-color: #eae5ce;
+}
+
+/* Keep working shimmer composable with hover: hover intensifies border
+ * + darkens base but lets the shimmer gradient pass through. */
+.linear-card.linear-card-working:hover {
+  background-color: #2a2b34;
+}
+
+/* Changed flash: one quick warm-ish wash, then settles back. */
+@keyframes linear-card-changed-flash {
+  0%   { background-color: #25262e; }
+  15%  { background-color: #403b27; }
+  100% { background-color: #25262e; }
+}
+
+.linear-card.linear-card-changed {
+  animation: linear-card-changed-flash 2.5s ease-out 1;
+}
+
+/* Priority selector row inside the card action menu. Each option is a
+ * small chip in the same footprint as the existing priority badge on
+ * cards, so the mental model carries over. Active option gets the
+ * cream fill; others stay ghost. */
+.linear-menu-divider {
+  height: 1px;
+  background: #3a3b45;
+  margin: 4px 0;
+}
+
+.linear-menu-priority {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+}
+
+.linear-menu-priority-label {
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  opacity: 0.55;
+  flex: 0 0 auto;
+}
+
+.linear-menu-priority-opts {
+  display: flex;
+  gap: 3px;
+  flex: 1 1 auto;
+  justify-content: flex-end;
+}
+
+.linear-menu-priority-btn {
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border: 1px solid #3a3b45;
+  color: #eae5ce;
+  opacity: 0.55;
+  cursor: pointer;
+  transition: opacity 0.1s, background 0.1s, color 0.1s, border-color 0.1s;
+  user-select: none;
+  min-width: 30px;
+  text-align: center;
+}
+
+.linear-menu-priority-btn:hover {
+  opacity: 1;
+  border-color: #eae5ce;
+}
+
+.linear-menu-priority-btn.active {
+  opacity: 1;
+  background: #eae5ce;
+  color: #2e2f38;
+  border-color: #eae5ce;
+}
+
+/* Urgent stays red-tinted even when inactive, matching the card badge
+ * convention so users can instinctively find it. */
+.linear-menu-priority-btn[data-priority="1"] {
+  color: #ff8080;
+  border-color: #7a3a3a;
+}
+
+.linear-menu-priority-btn[data-priority="1"].active {
+  background: #ff8080;
+  color: #2e2f38;
+  border-color: #ff8080;
+}
+
+.linear-menu-priority-btn[data-priority="2"]:not(.active) {
+  color: #ffd86b;
+}
+
+/* Branch mode selector (ask / new / reuse). Same visual language as the
+ * priority chips: ghost by default, cream-filled when active. Sits
+ * above the two action rows it affects. */
+.linear-menu-branch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+}
+
+.linear-menu-branch-label {
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  opacity: 0.55;
+  flex: 0 0 auto;
+}
+
+.linear-menu-branch-opts {
+  display: flex;
+  gap: 3px;
+  flex: 1 1 auto;
+  justify-content: flex-end;
+}
+
+.linear-menu-branch-btn {
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border: 1px solid #3a3b45;
+  color: #eae5ce;
+  opacity: 0.55;
+  cursor: pointer;
+  transition: opacity 0.1s, background 0.1s, color 0.1s, border-color 0.1s;
+  user-select: none;
+  min-width: 38px;
+  text-align: center;
+}
+
+.linear-menu-branch-btn:hover {
+  opacity: 1;
+  border-color: #eae5ce;
+}
+
+.linear-menu-branch-btn.active {
+  opacity: 1;
+  background: #eae5ce;
+  color: #2e2f38;
+  border-color: #eae5ce;
+}
+
+/* Drag-and-drop overlay shown while the user holds a file/folder over the
+ * window. Subtle dashed cream border + cream wash so it reads as "this
+ * area is a drop target" without obscuring the chrome behind it. */
+#file-drop-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(234, 229, 206, 0.05);
+  border: 2px dashed transparent;
+  z-index: 9999;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+#file-drop-overlay.active {
+  display: flex;
+  background: rgba(234, 229, 206, 0.07);
+  border-color: #eae5ce;
+}
+
+.file-drop-inner {
+  background: var(--bg);
+  border: 1px solid #eae5ce;
+  padding: 18px 24px;
+  text-align: center;
+  font-family: 'Gridbit', 'PixelPurl', 'Courier New', monospace;
+  box-shadow: 4px 4px 0 #000;
+}
+
+.file-drop-title {
+  color: #eae5ce;
+  font-size: 16px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+.file-drop-sub {
+  color: #eae5ce;
+  font-size: 11px;
+  letter-spacing: 1px;
+  opacity: 0.55;
+  margin-top: 6px;
+}
+
+/* "Attach to agent" chip row in the card menu. Each chip is the agent's
+ * name in its own palette color — clicking pins that color to the
+ * ticket title without sending any message or touching Linear. */
+.linear-menu-attach {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+}
+
+.linear-menu-attach-label {
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  opacity: 0.55;
+  flex: 0 0 auto;
+}
+
+.linear-menu-attach-opts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  flex: 1 1 auto;
+  justify-content: flex-end;
+  /* No max-width: let chips fill the row's available width like
+   * priority/branch. The label on the left already takes its intrinsic
+   * size; chips get everything else. */
+}
+
+.linear-menu-attach-chip {
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border: 1px solid;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.1s, color 0.1s, opacity 0.1s;
+  opacity: 0.75;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.linear-menu-attach-chip:hover {
+  opacity: 1;
+}
+
+.linear-menu-attach-chip.active {
+  opacity: 1;
+}
+
+.linear-menu-attach-none {
+  color: #888 !important;
+  border-color: #555 !important;
+  background: transparent;
+}
+
+.linear-menu-attach-none.active {
+  background: #555;
+  color: #eae5ce !important;
+}
+
+/* ============================================================
+   Chat branching — lanes inside the chat region.
+   #chat-lanes is a horizontal flex row living between the
+   sections above and the bottom of #app. Each .lane is a
+   self-contained vertical column; lane 0 reuses the existing
+   chat-response/chat-bar IDs so all existing CSS still works.
+   ============================================================ */
+
+#chat-lanes {
+  display: flex;
+  flex-direction: row;
+  flex: 1 1 auto;
+  min-height: 0; /* allow children to scroll inside */
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* Previously: a `padding-right: var(--chrome-reserve)` was placed
+ * here so chat-lane tabs wouldn't slide under the leaf chrome
+ * (drag handle + × close) at the wrapper's top-right corner. That
+ * gutter is invisible when chat is full-width (just a right margin)
+ * but becomes a visible empty band between chat and any section
+ * to its right in a horizontal split. The leaf chrome is hidden at
+ * rest and only fades in on hover, and chat-lane tabs are also
+ * hover-revealed — so the visual conflict was theoretical, not
+ * real. No gutter; tabs and leaf chrome share the corner. */
+.layout-host > #chat-lanes {
+  padding-right: 0;
+}
+
+.lane {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-width: 240px;
+  min-height: 0;
+  position: relative;
+  /* Clip overflowing children so the tab + history + input fit
+   * inside the lane bounds even when the agent-grid leaf below
+   * resizes and squeezes the chat region. Without this, fixed
+   * children (.lane-bar, .lane-tab) extend past the lane and
+   * either spill into the agent-grid area (creating the
+   * "blank gap" effect) or hide the tab strip at the top when
+   * the parent's overflow:hidden clips them. */
+  overflow: hidden;
+  /* No static border between lanes — the .lane-divider hover-line is
+   * the canonical visual separator. A second 1px line beside it
+   * looked like a duplicate resize handle. */
+  /* Smooth out flex-basis / min-max changes when a sibling collapses
+   * or the lane itself collapses. Transitioning flex shorthand
+   * isn't reliable across engines; longhand covers the layout
+   * bits. */
+  transition:
+    flex-basis 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    flex-grow 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    min-width 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    max-width 220ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Don't animate during a drag-resize — flex-basis updates fire on
+ * every mousemove and the transition would chase the cursor. The
+ * `lane-resizing` body class flips on for the drag's duration. */
+body.lane-resizing .lane {
+  transition: none;
+}
+
+/* Inner pieces fade and fold as the lane collapses so the change
+ * feels less abrupt than an instant display:none. We keep them in
+ * flow with `max-height` clamped to 0 (instead of display:none),
+ * because display flips don't run transitions reliably — coming
+ * back from display:none, the browser re-mounts the element and
+ * the opacity tween often snaps to its final value, which is
+ * exactly the "sometimes smooth, sometimes not" expand glitch. */
+.lane-history,
+.lane-bar,
+.lane-active-bar,
+.lane-task-panel,
+.lane-tab-title {
+  /* Generous default so natural content never clamps; collapsed
+   * state drives max-height to 0 to fold the row out. */
+  max-height: 5000px;
+  transition:
+    opacity 180ms ease,
+    max-height 220ms ease;
+}
+
+.lane.lane-collapsed > .lane-history,
+.lane.lane-collapsed > .lane-bar,
+.lane.lane-collapsed > .lane-active-bar,
+.lane.lane-collapsed > .lane-task-panel,
+/* Lane 0 owns these IDs directly (the chat-response, chat-bar, etc.
+ * live in the static HTML inside .lane.lane-zero), so when lane 0 is
+ * collapsed via the unified .lane-collapsed mechanism they need to
+ * fold the same way as the agent-lane equivalents above. */
+.lane.lane-collapsed > #chat-response,
+.lane.lane-collapsed > #chat-bar,
+.lane.lane-collapsed > #task-panel,
+.lane.lane-collapsed > #active-agents-bar,
+.lane.lane-collapsed > #image-queue {
+  opacity: 0;
+  max-height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.lane:last-child {
+  border-right: none;
+}
+
+/* Lane 0 owns the existing chat-response + chat-bar; no tab header
+ * needed unless the user has split the chat. The existing IDs keep
+ * their CSS, so this should be a visual no-op when only lane 0
+ * exists. */
+.lane.lane-zero > #chat-response {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Tab title row (Chrome / VSCode style) — minimal cream-on-dark
+ * stripe with the agent's avatar, name, and a hover-revealed × . */
+.lane-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px dashed #444;
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  flex: 0 0 auto;
+  position: relative;
+}
+
+.lane-tab.lane-tab-general {
+  opacity: 0.45;
+}
+
+.lane.lane-focused > .lane-tab {
+  border-bottom-color: #eae5ce;
+}
+
+.lane-tab-avatar {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 1px;
+  display: inline-block;
+}
+
+.lane-tab-title {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lane-tab-close {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  text-align: center;
+  line-height: 14px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s;
+  /* Sit above the layout-leaf chrome (drag handle z:20, × close z:21)
+   * so the rightmost lane's × stays clickable in a horizontal split
+   * where the leaf chrome shares the same corner. Previously a
+   * `padding-right` gutter on `.layout-host > #chat-lanes` kept tabs
+   * away from leaf chrome — that created a visible empty band
+   * between chat and any neighbor section, so the gutter is gone and
+   * we resolve the overlap via z-index instead. */
+  position: relative;
+  z-index: 22;
+}
+
+.lane:hover .lane-tab-close {
+  opacity: 0.4;
+}
+
+/* Section-host lanes (music, agents, avatars, linear) have no other
+ * obvious "put it back as a top-section" affordance — the section's
+ * own ▣ toggle is hidden while the panel lives in the lane. So keep
+ * the tab × persistently visible there so detach is always
+ * discoverable, not just on hover like agent lanes. */
+.lane.lane-section .lane-tab-close {
+  opacity: 0.6;
+}
+
+.lane-tab-close:hover {
+  opacity: 1 !important;
+  color: #ff7b7b;
+}
+
+/* Already-open feedback flash on the tab title when the user drags
+ * an agent that's already in a lane. */
+@keyframes lane-tab-already-open {
+  0%   { background: #eae5ce; color: #2e2f38; }
+  100% { background: transparent; }
+}
+
+.lane-tab.lane-tab-flash {
+  animation: lane-tab-already-open 0.6s ease-out 1;
+}
+
+/* History area for non-zero lanes: same styling as #chat-response
+ * but a fresh class so we don't pollute the existing id-based CSS. */
+.lane-history {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 6px 16px;
+  font-family: var(--chat-font);
+  font-size: var(--chat-font-size, 13px);
+  flex: 1 1 auto;
+  min-height: 60px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Per-lane input row for non-zero lanes — matches #chat-bar exactly so
+ * the input baselines line up across all lanes when split. Lighter
+ * inside (no boss-stop, no autocomplete, no image queue) but the row
+ * geometry is identical: same padding, border, alignment. */
+.lane-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 20px;
+  border-top: 1px solid #444;
+  flex-shrink: 0;
+  /* Anchor the slash-command autocomplete (#autocomplete) when it
+   * gets re-parented into a lane bar — it's `position: absolute`
+   * with `bottom: 100%` and needs a positioned ancestor here, not
+   * the outer `.lane` (which would float the dropdown up to the
+   * lane's top edge instead of just above the input). */
+  position: relative;
+}
+
+.lane-bar .prompt {
+  opacity: 0.45;
+  user-select: none;
+}
+
+.lane-input {
+  flex: 1 1 auto;
+  background: transparent;
+  border: none;
+  color: #eae5ce;
+  font-family: var(--chat-font);
+  font-size: var(--chat-font-size, 13px);
+  resize: none;
+  outline: none;
+  min-height: 18px;
+  max-height: 200px;
+  padding: 0;
+}
+
+.lane-input:disabled {
+  opacity: 0.4;
+}
+
+.lane-input::placeholder {
+  color: #eae5ce;
+  opacity: 0.35;
+}
+
+.lane-input::-webkit-input-placeholder {
+  color: #eae5ce;
+  opacity: 0.35;
+}
+
+/* Resize divider between adjacent lanes. */
+.lane-divider {
+  flex: 0 0 6px;
+  cursor: col-resize;
+  background: transparent;
+  position: relative;
+  z-index: 5;
+}
+
+.lane-divider::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 12px;
+  bottom: 12px;
+  width: 2px;
+  background: #3a3b45;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.lane-divider:hover::before,
+body.lane-resizing .lane-divider::before {
+  opacity: 1;
+  background: #eae5ce;
+}
+
+body.lane-resizing {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
+body.lane-resizing * {
+  cursor: col-resize !important;
+}
+
+/* Drop highlight on the lanes container during a valid agent drag. */
+#chat-lanes.lane-drop-target {
+  outline: 2px dashed #eae5ce;
+  outline-offset: -4px;
+}
+
+/* Grid frame state when an agent is captured by a lane. */
+.agent-frame.in-lane {
+  opacity: 0.85;
+}
+
+/* In-lane state is conveyed by frame opacity + grid sort order
+ * (in-lane agents push to the left). No bottom strip — the panel
+ * below the grid is the canonical "this one has a lane" cue. */
+
+/* Frame "tucked under a blanket" treatment for an agent whose lane
+ * has been collapsed to a strip: keep the full-size avatar, fold
+ * away secondary text, and overlay a cream-checker blanket that
+ * buries the bottom 1/3 of the sprite. Everything transitions in
+ * both directions — children fold via max-height + opacity (no
+ * display:none, so the frame's natural height eases smoothly), the
+ * blanket rises via ::before's height, and the frame eases its
+ * width / padding. No color tints; the silhouette change carries
+ * the signal. */
+
+/* Animate the frame's outer dimensions and the children whose
+ * collapse drives the height change. Transitions live on the base
+ * rule so they apply in BOTH directions (collapse + expand). */
+.agent-frame {
+  /* Default flex behaviour (`align-self: stretch`) is intentional —
+   * every item in the agent-grid row (Boss, regular agents, the
+   * music player) shares the same height for a clean, consistent
+   * row. Collapsed-lane frames opt out below with `align-self:
+   * flex-end` so they sit at the bottom of the row. */
+  transition:
+    min-width 220ms ease,
+    width 220ms ease,
+    padding 220ms ease,
+    opacity 180ms ease;
+}
+/* Inner content fills the stretched frame so the cream-checker
+ * bottom strip stays a 28px strip instead of becoming most of
+ * the frame's empty area. */
+.agent-frame-inner {
+  flex: 1 1 auto;
+}
+.agent-frame .frame-main {
+  transition:
+    padding 220ms ease,
+    gap 220ms ease,
+    min-width 220ms ease;
+}
+.agent-frame .creature-name,
+.agent-frame .agent-level,
+.agent-frame .xp-bar,
+.agent-frame .agent-status,
+.agent-frame .agent-stats,
+.agent-frame .agent-project,
+.agent-frame .agent-branch,
+.agent-frame .agent-task,
+.agent-frame .change-creature,
+.agent-frame .agent-count-badge,
+.agent-frame .frame-subs {
+  /* Generous default so normal text never clamps; collapsed state
+   * drives this to 0 to fold each row out of the column. */
+  max-height: 400px;
+  transition:
+    max-height 220ms ease,
+    opacity 180ms ease,
+    margin 220ms ease,
+    padding 220ms ease;
+}
+
+/* Always-present blanket pseudo on every frame, height: 0 by
+ * default. Collapsed lane lifts it up with a height transition so
+ * the cream-checker rises smoothly from below instead of popping. */
+.agent-frame::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 0;
+  background:
+    repeating-conic-gradient(#eae5ce 0% 25%, #2e2f38 0% 50%) 0 0 / 4px 4px;
+  pointer-events: none;
+  z-index: 5;
+  transition: height 240ms ease;
+}
+
+.agent-frame.in-collapsed-lane {
+  opacity: 1;
+  /* Inherit the same min-width / width as full frames so collapsed
+   * tiles align with their siblings in every container-query band
+   * (180px default → 140px mid → 100%-of-grid in narrow). The visual
+   * "parked" cue is the bottom-pinned alignment + folded content,
+   * not a width mismatch. */
+  align-self: flex-end;
+  overflow: hidden;
+  /* Keep some side+bottom padding so the cream-checker dither
+   * surrounds the avatar rather than being clipped flush. */
+  padding: 6px 6px 8px 6px;
+}
+.agent-frame.in-collapsed-lane .agent-frame-inner {
+  align-self: stretch;
+}
+.agent-frame.in-collapsed-lane .frame-main {
+  padding: 0;
+  min-width: 0;
+  gap: 0;
+}
+/* Fold secondary content via max-height + opacity instead of
+ * display:none — keeps the transition smooth in both directions.
+ * Frame's natural height collapses with them, so the outer box
+ * eases shut without an explicit height value to fight `auto`. */
+.agent-frame.in-collapsed-lane .creature-name,
+.agent-frame.in-collapsed-lane .agent-level,
+.agent-frame.in-collapsed-lane .xp-bar,
+.agent-frame.in-collapsed-lane .agent-status,
+.agent-frame.in-collapsed-lane .agent-stats,
+.agent-frame.in-collapsed-lane .agent-project,
+.agent-frame.in-collapsed-lane .agent-branch,
+.agent-frame.in-collapsed-lane .agent-task,
+.agent-frame.in-collapsed-lane .change-creature,
+.agent-frame.in-collapsed-lane .agent-count-badge,
+.agent-frame.in-collapsed-lane .frame-subs {
+  max-height: 0;
+  opacity: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.agent-frame.in-collapsed-lane::before {
+  /* 1/3 of the 80px avatar — head + torso visible, legs blanketed. */
+  height: calc(28px * var(--ui-scale, 1));
+  /* Force the calmer idle dither for the blanket regardless of the
+   * agent's actual status. A tucked frame should read "parked",
+   * not "actively working" — the lane-tab pulse is the canonical
+   * working signal once a lane is open. */
+  background:
+    repeating-conic-gradient(#4a4840 0% 25%, #2e2f38 0% 50%) 0 0 / 4px 4px;
+}
+/* Same reasoning for the frame's own background (the cream/idle
+ * pattern that shows around the inner): in collapsed state, ignore
+ * .active's bright cream and use the idle dither instead. */
+.agent-frame.in-collapsed-lane,
+.agent-frame.in-collapsed-lane.active {
+  background:
+    repeating-conic-gradient(#4a4840 0% 25%, #2e2f38 0% 50%) 0 0 / 4px 4px;
+}
+
+/* In-lane agents keep their cream-checker active background — just
+ * dimmed by the .in-lane opacity rule above — so the user can still
+ * tell at a glance whether the captured agent is working or idle.
+ * The lane tab pulse is the *primary* signal; the grid frame is the
+ * secondary glance-confirmation. */
+
+/* Dead-agent state for a lane whose agent has gone away. */
+.lane.lane-dead .lane-tab-avatar,
+.lane.lane-dead .lane-tab-title {
+  opacity: 0.4;
+}
+
+/* Working state on the lane tab — visible at-a-glance from across
+ * the screen, not just on the tiny avatar dot. Bottom border
+ * brightens to cream and slowly pulses; title stays at full
+ * opacity instead of the default 0.45-ish; trailing dots animate.
+ * Together these mirror the cream-checker on the grid frame so the
+ * "this agent is mid-turn" signal carries from grid to lane. */
+@keyframes lane-tab-working-bar {
+  0%   { opacity: 0.55; }
+  50%  { opacity: 1;    }
+  100% { opacity: 0.55; }
+}
+
+@keyframes lane-tab-working-dots {
+  0%   { content: ' .'; }
+  33%  { content: ' ..'; }
+  66%  { content: ' ...'; }
+  100% { content: ' .'; }
+}
+
+.lane-tab.lane-tab-working {
+  border-bottom-width: 2px;
+  border-bottom-style: solid;
+  /* Border color is set inline to the agent's hex from the JS side. */
+  animation: lane-tab-working-bar 1.6s ease-in-out infinite;
+}
+
+.lane-tab.lane-tab-working .lane-tab-avatar {
+  box-shadow: 0 0 0 2px rgba(234, 229, 206, 0.4);
+}
+
+.lane-tab.lane-tab-working .lane-tab-title::after {
+  content: ' ...';
+  opacity: 0.7;
+  letter-spacing: 0;
+  animation: lane-tab-working-dots 1.2s steps(1) infinite;
+}
+
+/* (Lane 0 used to have a bespoke slim-sidebar collapse with its own
+ * absolute-positioned chevron button. It now shares the same
+ * .lane-collapsed mechanism as agent lanes — see buildLaneTab in
+ * web/src/ui/lanes.ts and the .lane.lane-collapsed > children fold
+ * rule above.) */
+
+/* Per-lane active-agent chip — sits between the lane history and
+ * input bar when the lane's agent is mid-turn. Same chip styling as
+ * #active-agents-bar's children so the working signal looks identical
+ * in lane 0 and in agent lanes.
+ *
+ * Stays in layout always (not display:none) so toggling on/off can
+ * actually transition. The default state is collapsed (max-height 0
+ * + opacity 0); JS sets the inline `style.display` to 'flex' as a
+ * legacy hook for code that still toggles via display, but the
+ * visual collapse is driven by .is-visible / [data-active] below. */
+/* Lane picker panel — rendered above the lane input when the
+ * agent's terminal is showing a Claude Code picker. Question on top,
+ * a vertical list of buttons (one per option) below. Clicking a
+ * button sends the digit + Enter to the agent so the picker resolves
+ * without leaving Cloovies. Hidden via inline `display: none` when
+ * no picker is up; setLanePicker swaps that out. */
+.lane-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 20px;
+  background: var(--bg);
+  border-top: 1px solid #333;
+  flex-shrink: 0;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.lane-picker-q {
+  font-family: 'Gridbit', 'PixelPurl', monospace;
+  font-size: 13px;
+  color: #eae5ce;
+  letter-spacing: 0.5px;
+  /* Soft gold accent — matches the "awaiting choice" sprite tint
+   * so the visual identity of the picker state is consistent
+   * across the grid badge and the inline panel. */
+  border-left: 3px solid #e0aa5a;
+  padding-left: 10px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+.lane-picker-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lane-picker-opt {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 12px;
+  background: #25262e;
+  border: 1px solid #3a3b46;
+  color: #eae5ce;
+  font-family: 'Gridbit', 'PixelPurl', monospace;
+  font-size: 12px;
+  line-height: 1.3;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+  /* Override default button styling that doesn't fit the retro UI. */
+  border-radius: 0;
+}
+
+.lane-picker-opt:hover {
+  background: #2f303a;
+  border-color: #e0aa5a;
+}
+
+.lane-picker-opt:active {
+  background: #e0aa5a;
+  color: #2e2f38;
+}
+
+.lane-picker-num {
+  /* Fixed-width 1ch keeps option labels left-aligned across the
+   * column even when option count crosses 9 → 10 (extra digit). */
+  flex: 0 0 auto;
+  min-width: 1.5ch;
+  color: #e0aa5a;
+  font-weight: bold;
+}
+
+.lane-picker-opt:active .lane-picker-num {
+  color: #2e2f38;
+}
+
+.lane-picker-labelwrap {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.lane-picker-label {
+  flex: 1 1 auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Option description — the indented explanatory line under an
+ * AskUserQuestion option. Muted + slightly smaller so the title leads. */
+.lane-picker-desc {
+  font-size: 11px;
+  line-height: 1.35;
+  color: #9a9686;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.lane-picker-opt:active .lane-picker-desc {
+  color: #50505a;
+}
+
+/* Checkbox (multi-select toggle) state — checked options get the gold
+ * accent so the current selection reads at a glance. */
+.lane-picker-checkbox.is-checked {
+  border-color: #e0aa5a;
+}
+
+.lane-picker-checkbox.is-checked .lane-picker-num {
+  color: #e0aa5a;
+}
+
+/* Highlighted option — the one the terminal's cursor is on, i.e. the one the
+ * preview below belongs to. Gold left-edge ties it to its nested preview. */
+.lane-picker-opt.is-cursor {
+  border-color: #e0aa5a;
+  border-left: 3px solid #e0aa5a;
+}
+
+/* Preview block nested under its option. Indented + a connector caption so
+ * it's unmistakably "the preview for THIS option". */
+.lane-picker-preview-wrap {
+  margin: -2px 0 4px 24px;
+}
+
+.lane-picker-preview-cap {
+  font-family: 'Gridbit', 'PixelPurl', monospace;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  color: #e0aa5a;
+  margin-bottom: 3px;
+}
+
+/* Preview panel — the agent's right-column content/diff preview, mirrored
+ * verbatim. MUST stay monospace with preserved whitespace so the box-drawing
+ * aligns exactly as the terminal drew it (the whole point of the mirror). */
+.lane-picker-preview {
+  margin: 2px 0 0;
+  padding: 10px 12px;
+  background: #1c1d24;
+  border: 1px solid #3a3b46;
+  border-left: 3px solid #6a6b78;
+  color: #c8c3ad;
+  /* A real monospace stack — the pixel UI fonts aren't fixed-width, which
+   * would break box-drawing alignment. */
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 11px;
+  line-height: 1.3;
+  white-space: pre;
+  overflow-x: auto;
+  tab-size: 4;
+}
+
+/* Submit — multi-select commit button. Prominent gold so it's clearly the
+ * action that finishes the answer (the thing that was missing before). */
+.lane-picker-submit {
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 7px 18px;
+  background: #e0aa5a;
+  border: 1px solid #e0aa5a;
+  color: #2e2f38;
+  font-family: 'Gridbit', 'PixelPurl', monospace;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  border-radius: 0;
+  transition: background 0.1s;
+}
+
+.lane-picker-submit:hover {
+  background: #eabb73;
+}
+
+.lane-picker-submit:active {
+  background: #c89548;
+}
+
+.lane-active-bar {
+  display: flex;
+  padding: 0 20px;
+  background: var(--bg);
+  flex-shrink: 0;
+  border-top: 0 solid transparent;
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition:
+    max-height 280ms cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 220ms ease,
+    padding 220ms ease,
+    border-top-width 220ms ease;
+}
+.lane-active-bar[data-active="true"],
+.lane-active-bar.is-visible {
+  max-height: 80px;
+  opacity: 1;
+  padding: 8px 20px;
+  border-top: 1px solid #333;
+  /* Subtle cream light-up on the first paint, mirroring the
+   * `linear-card-changed-flash` rhythm — fades out after 700ms. */
+  animation: lane-active-bar-pop 700ms ease-out 1;
+}
+
+@keyframes lane-active-bar-pop {
+  0%   { background: rgba(234, 229, 206, 0.10); }
+  100% { background: var(--bg); }
+}
+
+/* Faded grid frames for agents that aren't lane-attached while at
+ * least one agent lane is open. Tab cycles only through attached
+ * panels in that mode, so the fade matches what the keyboard does.
+ * Strong fade so the eye is clearly drawn to the attached set. */
+.agent-frame.cycle-skipped {
+  opacity: 0.18;
+  filter: grayscale(0.5);
+}
+
+/* When the main chat (lane 0) is collapsed, Boss is unreachable
+ * via Tab cycling and the user has signalled they want the
+ * general chat out of the way — hide Boss's grid frame entirely
+ * to match. */
+body.lane-zero-is-collapsed #boss-frame {
+  display: none;
+}
+
+/* Lane-tab drag-and-drop swap: source dims while dragging; target
+ * gets a cream highlight on the bottom border to show the drop. */
+.lane-tab.lane-tab-dragging {
+  opacity: 0.4;
+}
+
+.lane-tab.lane-tab-drop {
+  background: rgba(234, 229, 206, 0.08);
+  border-bottom: 2px solid #eae5ce;
+}
+
+/* Whole-lane drop highlight: the lane container itself becomes a
+ * forgiving drop target during a tab drag, so users can drop on
+ * any part of the panel — body, history, input bar — not just the
+ * thin tab strip. The cream dashed outline matches the existing
+ * #chat-lanes.lane-drop-target affordance for agent-frame drops. */
+.lane.lane-swap-drop {
+  outline: 2px dashed #eae5ce;
+  outline-offset: -4px;
+  background: rgba(234, 229, 206, 0.04);
+}
+
+/* Send-failed flash on lane inputs — red border tint that pulses
+ * for ~700ms so the user sees why their message didn't go. The
+ * input value stays so they can retry without retyping. */
+@keyframes lane-input-send-failed-flash {
+  0%   { box-shadow: 0 0 0 0 rgba(255, 123, 123, 0.6); border-color: #ff7b7b; }
+  100% { box-shadow: 0 0 0 4px rgba(255, 123, 123, 0); border-color: transparent; }
+}
+
+.lane-input.lane-input-send-failed {
+  animation: lane-input-send-failed-flash 0.7s ease-out 1;
+  border-radius: 2px;
+}
+
+/* Collapsed agent lane — shrinks to a thin vertical strip showing
+ * the agent name rotated 90°. Hides history + input + active-bar
+ * so only the tab spine remains. Click anywhere on the strip to
+ * expand back. */
+.lane.lane-collapsed {
+  flex: 0 0 32px !important;
+  min-width: 32px !important;
+  /* No max-width here on purpose: flex-grow:0 already pins the lane at
+   * 32px, and a `max-width: 32px → none` change can't be interpolated,
+   * so it released instantly on expand and snapped the panel open
+   * before min-width/flex-basis could animate. */
+  cursor: pointer;
+}
+
+/* `.lane.lane-collapsed > .lane-history / .lane-bar / .lane-active-bar`
+ * are folded via max-height + opacity in the rule near the top of
+ * the lane block (search "Inner pieces fade and fold"). Don't add a
+ * display:none rule here — it kills the expand transition on the
+ * way back. */
+
+.lane.lane-collapsed > .lane-tab {
+  flex-direction: column;
+  padding: 8px 4px;
+  height: 100%;
+  align-items: center;
+  border-bottom: none;
+  border-right: 1px dashed #444;
+  gap: 6px;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+}
+
+.lane.lane-collapsed > .lane-tab .lane-tab-title {
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+  letter-spacing: 2px;
+}
+
+.lane.lane-collapsed > .lane-tab .lane-tab-collapse,
+.lane.lane-collapsed > .lane-tab .lane-tab-terminal {
+  display: none;
+}
+
+.lane.lane-collapsed > .lane-tab .lane-tab-close {
+  /* Stay clickable on the strip — top of the column. */
+  writing-mode: horizontal-tb;
+  margin-top: 0;
+  opacity: 0.4;
+}
+
+.lane.lane-collapsed:hover > .lane-tab .lane-tab-close {
+  opacity: 1;
+}
+
+.lane.lane-collapsed > .lane-tab .lane-tab-avatar {
+  writing-mode: horizontal-tb;
+  margin-bottom: 2px;
+}
+
+/* Collapse / expand button on the tab — the small `–` next to the
+ * close ×. Shown on lane hover, mirrors the close button's fade. */
+.lane-tab-collapse {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  line-height: 14px;
+  text-align: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s;
+  user-select: none;
+  /* Match `.lane-tab-close` — z-index above #top-controls so the
+   * rightmost lane's `–` stays clickable under the top-right menu. */
+  position: relative;
+  z-index: 11;
+}
+
+.lane:hover .lane-tab-collapse {
+  opacity: 0.4;
+}
+
+.lane-tab-collapse:hover {
+  opacity: 1 !important;
+  color: #eae5ce;
+}
+
+/* Open-terminal button on the tab — the small `>` left of the collapse
+ * `–`. Same hover-fade as collapse/close so the tab stays clean at rest. */
+.lane-tab-terminal {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  line-height: 14px;
+  text-align: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s;
+  user-select: none;
+  position: relative;
+  z-index: 11;
+}
+
+.lane:hover .lane-tab-terminal {
+  opacity: 0.4;
+}
+
+.lane-tab-terminal:hover {
+  opacity: 1 !important;
+  color: #eae5ce;
+}
+
+/* Boss lane tab — same shape as agent lane tabs but label-only
+ * (no close, collapse, or drag). Only rendered once at least one
+ * agent lane is attached, so the chat region looks unchanged in the
+ * single-lane case. */
+.lane-tab-zero {
+  cursor: default;
+}
+
+.lane-tab-zero .lane-tab-avatar {
+  background: #eae5ce;
+}
+
+.lane-tab-zero .lane-tab-title {
+  color: #eae5ce;
+}
+
+.lane-tab-hidden {
+  display: none !important;
+}
+
+/* Section-as-lane styles — every section reparented into the
+ * chat-lanes strip via addSectionLane gets a `.lane.lane-section`
+ * container with `.lane-section-<id>` for per-section tweaks (e.g.
+ * the Linear panel needs different overflow than the music bar).
+ * Strip the panel's own border / margin / max-height so it fills
+ * the lane without doubled chrome.
+ *
+ * `min-height: 0` on the panel + its scrolling child is the key to
+ * making the panel actually shrink to fit the lane — without it,
+ * flex's default `min-height: auto` measures the content's
+ * intrinsic height and refuses to clamp, which is what was making
+ * the kanban / music bar overflow past the bottom of the screen. */
+.lane.lane-section > #linear-panel,
+.lane.lane-section > #music-bar,
+.lane.lane-section > #agent-grid,
+.lane.lane-section > #active-agents-bar {
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  border: none;
+  margin: 0;
+  max-height: none;
+  align-self: stretch;
+}
+
+/* Section-host lanes can shrink narrower than chat lanes — let them
+ * fit their content tightly. Mirrors `SECTION_LANE_MIN_PX` in
+ * lanes.ts so the divider drag clamp and the CSS minimum agree. */
+.lane.lane-section.lane-section-agent-grid       { min-width: 120px; }
+.lane.lane-section.lane-section-music-bar         { min-width: 160px; }
+.lane.lane-section.lane-section-active-agents-bar { min-width: 120px; }
+
+/* Agent grid hosted as a lane: zero internal side padding and let
+ * each frame stretch to the lane width so the cream-checker frames
+ * sit edge-to-edge with no dead horizontal gaps no matter how
+ * narrow the user drags the divider. Vertical padding stays so
+ * the first/last frames don't touch the tab / lane edge. */
+.lane.lane-section > #agent-grid {
+  padding: 8px 0;
+  gap: 8px;
+}
+.lane.lane-section > #agent-grid[data-grid-mode="narrow"] > .agent-frame {
+  /* In narrow column lanes (single-card-per-row list), drop the 180px
+   * floor and pin frames to the lane width so the cream-checker
+   * borders sit edge-to-edge with no dead horizontal gaps. Default
+   * (card) and row modes keep their natural max-width so a 4-card
+   * row in a wide lane doesn't stretch each card into a giant boxy
+   * frame with a tiny sprite floating in the middle. */
+  min-width: 0;
+  width: 100%;
+}
+/* Linear's body is the scrolling region inside the panel. */
+.lane.lane-section.lane-section-linear > #linear-panel .linear-body {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: none;
+}
+/* Music / agents are tall single elements with internal layout —
+ * let the section itself scroll if it's bigger than the lane. */
+.lane.lane-section > #music-bar,
+.lane.lane-section > #agent-grid {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+/* Hide the section-drag handle when hosted inside a lane — the
+ * lane's × close is the canonical detach action while in lane mode.
+ * The -/+ size buttons stay visible: they control content scale
+ * (sprite size, card density), which the user wants in every layout
+ * — including lanes where frames can otherwise look too big or too
+ * small for the slot. */
+.lane.lane-section > * > .section-drag-handle {
+  display: none !important;
+}
+/* Linear's own width-resize handle lives at left:-4px of #linear-panel.
+ * In lane mode it overlaps the lane-divider area, which (a) renders
+ * as a duplicate "second line" right beside the divider and (b) sits
+ * at z-index 14 so it intercepts mousedown — that's why the lane-tab
+ * swap-drag wasn't starting on the Linear lane. Lanes use the shared
+ * lane-divider for resizing, so kill the handle whenever the panel
+ * is hosted as a lane, regardless of data-docked state. */
+.lane.lane-section .linear-resize-handle {
+  display: none !important;
+}
+
+.lane-tab-linear,
+.lane-tab-section {
+  cursor: grab;
+}
+.lane-tab-linear:active,
+.lane-tab-section:active {
+  cursor: grabbing;
+}
+
+/* When lane 0 is in slim-sidebar mode (horizontal layout), hide its
+ * tab — the column is already a 32px-wide strip and a horizontal tab
+ * title would overflow. In vertical layout the slim strip is 32px
+ * *tall* and the full container width, so the tab fits and is the
+ * only label that identifies the column — keep it visible. */
+/* (Old hide-tab-on-collapse rule removed: lane 0 now uses the
+ * unified .lane.lane-collapsed mechanism, which rotates the tab
+ * title via writing-mode just like agent lanes — same affordance
+ * across all lane kinds.) */
+
+/* ============================================================
+   Vertical-stack lanes — `body.lanes-vertical` flips the chat-lanes
+   row into a column so the panels stack top-to-bottom for tall
+   monitors. flex-basis still drives main-axis size, so the
+   existing per-lane width values become height values automatically.
+   ============================================================ */
+body.lanes-vertical #chat-lanes {
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+body.lanes-vertical .lane {
+  min-width: 0;
+  min-height: 200px;
+}
+
+body.lanes-vertical .lane-divider {
+  cursor: row-resize;
+}
+
+body.lanes-vertical .lane-divider::before {
+  left: 12px;
+  right: 12px;
+  top: 2px;
+  bottom: auto;
+  width: auto;
+  height: 2px;
+}
+
+body.lane-resizing.lanes-vertical,
+body.lane-resizing.lanes-vertical * {
+  cursor: row-resize !important;
+}
+
+/* Collapsed lane in vertical mode: short horizontal strip with the
+ * tab running left-to-right (un-rotated text), instead of a thin
+ * vertical column. */
+body.lanes-vertical .lane.lane-collapsed {
+  flex: 0 0 32px !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
+}
+
+body.lanes-vertical .lane.lane-collapsed > .lane-tab {
+  flex-direction: row;
+  padding: 6px 10px;
+  height: 100%;
+  width: 100%;
+  border-right: none;
+  border-bottom: 1px dashed #444;
+  writing-mode: horizontal-tb;
+}
+
+body.lanes-vertical .lane.lane-collapsed > .lane-tab .lane-tab-title {
+  letter-spacing: normal;
+}
+
+/* Lane 0 (main chat) collapsed in vertical mode: full-width, 32px
+ * tall strip at the top of the column, mirroring the agent-lane
+ * collapsed strip. The horizontal-mode rule (32px-wide sidebar)
+ * doesn't apply here — the column-flex cross axis is now horizontal,
+ * so width should stretch and height should pin to 32px instead. */
+/* (Old vertical-mode lane-zero-collapsed rule removed: the unified
+ * `body.lanes-vertical .lane.lane-collapsed` rule above already
+ * shapes lane 0 the same way as agent lanes — 32px-tall horizontal
+ * strip across the full container width.) */
+
+/* =============================================================
+ * Modular split-tree layout
+ * ============================================================= */
+
+.layout-root {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+  /* The horizontal gutter on the right edge of every leaf reserved
+   * exclusively for the layout chrome (drag handle + × close).
+   * Section action buttons (linear-hover-btn, etc.) anchor right of
+   * this value so they never overlap the chrome. Tweak in one place
+   * to retune the whole app. */
+  --chrome-reserve: 50px;
+}
+
+.layout-node {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+
+.layout-leaf {
+  flex-direction: column;
+}
+
+.layout-leaf .layout-host {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.layout-leaf .layout-host > section,
+.layout-leaf .layout-host > [data-layout-section] {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* The base `#linear-panel` rule pins itself with `flex: 0 0 auto;
+ * max-height: 60vh` for the legacy "undocked, sitting in the body"
+ * scenario. That ID selector wins over the generic
+ * `.layout-leaf .layout-host > [data-layout-section]` because IDs
+ * out-rank classes, so without this override the panel would cap
+ * at 60vh inside a layout-leaf and crop the kanban. Re-state the
+ * fill behavior here with enough specificity to win. Same for
+ * #music-bar which has its own legacy flex sizing. */
+.layout-leaf .layout-host > #linear-panel,
+.layout-leaf .layout-host > #music-bar,
+.layout-leaf .layout-host > #agent-grid,
+.layout-leaf .layout-host > #active-agents-bar {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  max-height: none;
+  align-self: stretch;
+  margin: 0;
+}
+
+/* (Music-bar grows with the layout slot — internal CSS makes the
+ *  cover scale with bar height while the info/controls stay a thin
+ *  strip alongside, so the cover dominates the available space.) */
+
+.layout-split {
+  /* flex-direction is set inline based on orientation */
+  flex: 1 1 auto;
+}
+
+/* Thin dashed line in a transparent track — matches .lane-divider and
+ * the dashed 1px #444/#555 separators used elsewhere in the app so the
+ * layout reads as part of the same visual family rather than a heavy
+ * solid bar between regions. The wider 8px hit zone is invisible; only
+ * the centered 1px dashed line draws. Brightens to cream on hover or
+ * while actively dragging. */
+.layout-divider {
+  flex: 0 0 8px;
+  background: transparent;
+  cursor: col-resize;
+  position: relative;
+  z-index: 5;
+}
+.layout-divider::before {
+  content: '';
+  position: absolute;
+  /* Default: vertical line down the middle for horizontal splits.
+   * Faded but continuous (full length, solid) so the resize handle is
+   * findable against the dark bg — the old dashed #444 was effectively
+   * invisible. Brightens on hover / while resizing. */
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1px solid rgba(234, 229, 206, 0.22);
+  transform: translateX(-0.5px);
+  transition: border-color 120ms ease;
+  pointer-events: none;
+}
+.layout-divider[data-layout-orientation="vertical"] {
+  cursor: row-resize;
+}
+.layout-divider[data-layout-orientation="vertical"]::before {
+  /* Vertical split → divider runs horizontally. */
+  left: 0;
+  right: 0;
+  top: 50%;
+  bottom: auto;
+  width: auto;
+  height: 0;
+  border-left: none;
+  border-top: 1px solid rgba(234, 229, 206, 0.22);
+  transform: translateY(-0.5px);
+}
+.layout-divider:hover::before,
+body.layout-resizing .layout-divider::before {
+  border-color: #eae5ce;
+}
+
+.layout-tabs {
+  flex-direction: column;
+}
+.layout-tab-strip {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: row;
+  background: #1c1d24;
+  border-bottom: 1px solid #3a3b46;
+  height: 26px;
+  align-items: stretch;
+  user-select: none;
+}
+.layout-tab {
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  font-size: 11px;
+  color: #8a8a8a;
+  cursor: pointer;
+  border-right: 1px solid #3a3b46;
+  background: transparent;
+}
+.layout-tab:hover { color: #eae5ce; }
+.layout-tab.layout-tab-active {
+  color: #eae5ce;
+  background: #2e2f38;
+}
+
+.layout-tabs .layout-host {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.layout-drag-handle {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 14px;
+  height: 18px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-gap: 2px;
+  align-content: center;
+  cursor: grab;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  z-index: 20;
+  padding: 2px;
+}
+.layout-drag-handle > span {
+  display: block;
+  width: 3px;
+  height: 3px;
+  background: #6a6b76;
+  border-radius: 0;
+}
+.layout-leaf:hover > .layout-drag-handle,
+.layout-tabs:hover > .layout-drag-handle {
+  opacity: 1;
+}
+.layout-drag-handle:hover > span { background: #eae5ce; }
+.layout-drag-handle:active { cursor: grabbing; }
+
+.layout-source-dragging {
+  opacity: 0.3;
+  filter: grayscale(0.5);
+}
+
+.layout-drag-ghost {
+  background: #2e2f38;
+  color: #eae5ce;
+  border: 1px solid #eae5ce;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-family: monospace;
+  white-space: nowrap;
+}
+
+.layout-drop-overlay {
+  background: rgba(234, 229, 206, 0.20);
+  border: 2px dashed rgba(234, 229, 206, 0.7);
+  box-sizing: border-box;
+  transition: left 60ms ease, top 60ms ease, width 60ms ease, height 60ms ease;
+}
+
+.layout-placeholder {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #4a4b56;
+  font-family: monospace;
+  font-size: 11px;
+}
+
+/* --- Fallback picker overlay ---
+ * Floating picker shown when an agent has a Claude Code picker pending
+ * but the lane cap was hit. Reuses the existing `.picker-overlay` /
+ * `.picker-modal` / `.picker-title` chrome and just adds the in-modal
+ * layout for cwd / question / option list. */
+.fallback-picker-modal {
+  max-width: 640px;
+  min-width: 360px;
+  font-family: 'Gridbit', 'PixelPurl', 'Courier New', monospace;
+}
+
+.fallback-picker-cwd {
+  font-size: 11px;
+  opacity: 0.55;
+  letter-spacing: 0.5px;
+  text-align: center;
+  margin-bottom: 12px;
+  word-break: break-all;
+}
+
+.fallback-picker-question {
+  font-size: 13px;
+  color: #eae5ce;
+  margin-bottom: 16px;
+  text-align: center;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.fallback-picker-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fallback-picker-option {
+  background: var(--bg);
+  border: 1px solid #eae5ce;
+  color: #eae5ce;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 8px 12px;
+  text-align: left;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+}
+
+.fallback-picker-option:hover {
+  background: #eae5ce;
+  color: #2e2f38;
+}
+
+/* Multi-select parity for the floating fallback overlay. */
+.fallback-picker-option {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.fallback-picker-option.is-checked {
+  border-color: #e0aa5a;
+  color: #e0aa5a;
+}
+
+.fallback-picker-option.is-checked:hover {
+  background: #e0aa5a;
+  color: #2e2f38;
+}
+
+.fallback-picker-desc {
+  font-size: 11px;
+  line-height: 1.35;
+  color: #9a9686;
+  white-space: pre-wrap;
+}
+
+.fallback-picker-submit {
+  margin-top: 6px;
+  padding: 8px 18px;
+  background: #e0aa5a;
+  border: 1px solid #e0aa5a;
+  color: #2e2f38;
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+}
+
+.fallback-picker-submit:hover {
+  background: #eabb73;
+}
+
+body.layout-dragging,
+body.layout-dragging * {
+  user-select: none;
+  -webkit-user-select: none;
+}
+body.layout-resizing,
+body.layout-resizing * {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Per-leaf × close + hidden-sections shelf */
+
+.layout-leaf-close {
+  position: absolute;
+  top: 4px;
+  right: 22px; /* sits left of the drag handle */
+  width: 16px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: #6a6b76;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  z-index: 21;
+  user-select: none;
+}
+.layout-leaf:hover > .layout-leaf-close,
+.layout-tabs:hover > .layout-leaf-close {
+  opacity: 1;
+}
+.layout-leaf-close:hover { color: #eae5ce; }
+
+.layout-shelf {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  display: flex;
+  gap: 4px;
+  z-index: 30;
+  pointer-events: none;
+}
+.layout-shelf-chip {
+  pointer-events: auto;
+  background: #2e2f38;
+  color: #eae5ce;
+  border: 1px solid #3a3b46;
+  font-family: monospace;
+  font-size: 11px;
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: 0;
+  opacity: 0.5;
+  transition: opacity 120ms ease, background 120ms ease;
+}
+.layout-shelf-chip:hover {
+  opacity: 1;
+  background: #3a3b46;
+}
+
+/* File-drop target highlight — applied to the .lane / #chat-bar that
+ * will receive the path when the user releases the drop. Subtle dashed
+ * cream outline matches the file-drop-overlay's affordance. */
+.file-drop-target {
+  outline: 2px dashed #eae5ce;
+  outline-offset: -4px;
+  background: rgba(234, 229, 206, 0.04);
+  transition: outline-color 0.12s, background 0.12s;
+}
+
+/* --- Worktree spawn affordances ---
+ * Two per-frame buttons (`⎘` spawn-sibling, `×` remove-worktree) plus
+ * the popover that opens when `⎘` is clicked. Hover-revealed at rest
+ * so frames stay clean unless you're actively interacting. */
+
+.agent-frame {
+  /* The chrome buttons are positioned absolute against the frame. The
+   * frame already has `position: relative` in most contexts, but make
+   * it explicit here so the buttons anchor correctly even when a new
+   * grid mode rewires the frame's box. */
+  position: relative;
+}
+
+/* Top-right chrome strip: close / term / spawn-sibling / remove-worktree
+ * all live in a single flex container so they sit side-by-side and
+ * pack tight when conditional buttons (spawn / remove) aren't shown.
+ * Final visual order is [⎘] [×] [>] [x] — close stays at the
+ * frame's far right corner regardless of which other buttons exist. */
+.frame-chrome {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  flex-direction: row;
+  gap: 2px;
+  z-index: 2;
+}
+
+/* Inside the chrome strip the buttons flow naturally — drop the
+ * legacy `position: absolute; right: <Npx>` that each button used
+ * back when they each placed themselves. */
+.frame-chrome > .agent-close-btn,
+.frame-chrome > .agent-term-btn,
+.frame-chrome > .frame-spawn-sibling,
+.frame-chrome > .frame-remove-worktree,
+.frame-chrome > .frame-interrupt {
+  position: static;
+  top: auto;
+  right: auto;
+}
+
+/* Worktree-button base styling (size + color + opacity ramp). */
+.frame-spawn-sibling,
+.frame-remove-worktree,
+.frame-interrupt {
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  line-height: 14px;
+  color: #eae5ce;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease;
+  user-select: none;
+  text-align: center;
+}
+
+.agent-frame:hover .frame-spawn-sibling,
+.agent-frame:hover .frame-remove-worktree,
+.agent-frame:hover .frame-interrupt {
+  opacity: 0.6;
+}
+
+/* Hover cutout plate — applies to ALL chrome buttons (close, term,
+ * spawn-sibling, remove-worktree, interrupt). A solid `var(--bg)`
+ * plate gives the glyph a cutout look so it pops on the checkerboard
+ * frame background, with full opacity for a clear affordance. */
+.frame-chrome > .agent-close-btn:hover,
+.frame-chrome > .agent-term-btn:hover,
+.frame-chrome > .frame-spawn-sibling:hover,
+.frame-chrome > .frame-remove-worktree:hover,
+.frame-chrome > .frame-interrupt:hover {
+  opacity: 1 !important;
+  background: var(--bg);
+}
+
+/* Popover anchored next to the agent frame. Compact form-card. */
+.worktree-spawn-popover {
+  background: var(--bg);
+  border: 1px solid #eae5ce;
+  padding: 8px 10px;
+  min-width: 220px;
+  font-family: 'Gridbit', 'PixelPurl', 'Courier New', monospace;
+  color: #eae5ce;
+  font-size: 11px;
+  box-shadow: 4px 4px 0 #000;
+}
+
+.worktree-spawn-title {
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  opacity: 0.7;
+  margin-bottom: 6px;
+}
+
+.worktree-spawn-name {
+  display: block;
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid #555;
+  color: #eae5ce;
+  padding: 4px 6px;
+  font-family: inherit;
+  font-size: 11px;
+  margin-bottom: 6px;
+  box-sizing: border-box;
+}
+
+.worktree-spawn-name:focus {
+  outline: none;
+  border-color: #eae5ce;
+}
+
+.worktree-spawn-error {
+  min-height: 14px;
+  color: #e07050;
+  font-size: 10px;
+  margin-bottom: 4px;
+}
+
+.worktree-spawn-buttons {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.worktree-spawn-cancel,
+.worktree-spawn-go {
+  background: var(--bg);
+  border: 1px solid #eae5ce;
+  color: #eae5ce;
+  font-family: inherit;
+  font-size: 11px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.worktree-spawn-cancel:hover,
+.worktree-spawn-go:hover {
+  background: #eae5ce;
+  color: #2e2f38;
+}
+
+.worktree-spawn-go:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.worktree-spawn-loading {
+  font-size: 10px;
+  opacity: 0.55;
+  text-align: center;
+  margin-bottom: 8px;
+  letter-spacing: 0.5px;
+}
+
+.worktree-spawn-existing {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.worktree-spawn-existing-title {
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  opacity: 0.55;
+  margin-bottom: 2px;
+}
+
+.worktree-spawn-existing-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  border: 1px solid #3a3b45;
+}
+
+.worktree-spawn-existing-row > .row-label {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.worktree-spawn-existing-name {
+  color: #eae5ce;
+  font-size: 11px;
+}
+
+.worktree-spawn-existing-branch {
+  font-size: 9px;
+  opacity: 0.45;
+  letter-spacing: 0.5px;
+}
+
+.worktree-spawn-existing-resume {
+  background: var(--bg);
+  border: 1px solid #eae5ce;
+  color: #eae5ce;
+  font-family: inherit;
+  font-size: 10px;
+  padding: 2px 8px;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+}
+
+.worktree-spawn-existing-resume:hover {
+  background: #eae5ce;
+  color: #2e2f38;
+}
+
+.worktree-spawn-existing-delete {
+  background: var(--bg);
+  border: 1px solid #3a3b45;
+  color: #eae5ce;
+  opacity: 0.6;
+  font-family: inherit;
+  font-size: 10px;
+  padding: 2px 6px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.worktree-spawn-existing-delete:hover {
+  opacity: 1;
+  border-color: #e07050;
+  color: #e07050;
+}
+
+.worktree-spawn-existing-delete:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.worktree-spawn-existing-running {
+  font-size: 9px;
+  opacity: 0.55;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 2px 8px;
+}
+
+.worktree-spawn-divider {
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  opacity: 0.55;
+  text-align: center;
+  margin: 8px 0 4px;
+}
+
+/* --- Fallback picker overlay ---
+ * Floating picker shown when an agent has a Claude Code picker pending
+ * but the lane cap was hit. Reuses the existing `.picker-overlay` /
+ * `.picker-modal` / `.picker-title` chrome and just adds the in-modal
+ * layout for cwd / question / option list. */
+.fallback-picker-modal {
+  max-width: 640px;
+  min-width: 360px;
+  font-family: 'Gridbit', 'PixelPurl', 'Courier New', monospace;
+}
+
+.fallback-picker-cwd {
+  font-size: 11px;
+  opacity: 0.55;
+  letter-spacing: 0.5px;
+  text-align: center;
+  margin-bottom: 12px;
+  word-break: break-all;
+}
+
+.fallback-picker-question {
+  font-size: 13px;
+  color: #eae5ce;
+  margin-bottom: 16px;
+  text-align: center;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.fallback-picker-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fallback-picker-option {
+  background: var(--bg);
+  border: 1px solid #eae5ce;
+  color: #eae5ce;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 8px 12px;
+  text-align: left;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+}
+
+.fallback-picker-option:hover {
+  background: #eae5ce;
+  color: #2e2f38;
+}
+
+/* ============================================================
+ * Preflight: env-health diagnostics modal + settings row.
+ * The status is surfaced as a row inside Settings → general
+ * (see .settings-diagnostics-* below); the modal stays as the
+ * detailed view, opened from that row's "view details" button.
+ * ============================================================ */
+
+.settings-diagnostics-row[data-status="ok"]    .settings-diagnostics-dot { background: #6ad36a; }
+.settings-diagnostics-row[data-status="warn"]  .settings-diagnostics-dot { background: #e7b733; }
+.settings-diagnostics-row[data-status="error"] .settings-diagnostics-dot { background: #d35a5a; }
+.settings-diagnostics-row[data-status="pending"] .settings-diagnostics-dot { background: #555; }
+
+.settings-diagnostics-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-diagnostics-dot {
+  width: 8px;
+  height: 8px;
+  display: inline-block;
+  border: 1px solid #2e2f38;
+  background: #555;
+}
+
+.settings-diagnostics-text {
+  font-family: 'Gridbit', 'PixelPurl', 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #eae5ce;
+}
+
+.settings-diagnostics-view {
+  appearance: none;
+  font-family: 'Gridbit', 'PixelPurl', 'Courier New', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #eae5ce;
+  background: #2e2f38;
+  border: 1px solid #555;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.settings-diagnostics-view:hover:not(:disabled) {
+  background: #34353f;
+  border-color: #777;
+}
+
+.settings-diagnostics-view:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.preflight-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.preflight-modal {
+  border: 2px solid #eae5ce;
+  background: var(--bg);
+  width: min(720px, 92vw);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  font-family: 'Gridbit', 'PixelPurl', 'Courier New', monospace;
+  font-size: 12px;
+  color: #eae5ce;
+}
+
+.preflight-header {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  padding: 14px 18px;
+  border-bottom: 1px dashed #555;
+}
+
+.preflight-title {
+  font-size: 14px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  flex: 1;
+}
+
+.preflight-refresh,
+.preflight-close {
+  cursor: pointer;
+  opacity: 0.5;
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.preflight-refresh:hover,
+.preflight-close:hover { opacity: 1; }
+
+.preflight-close { font-size: 18px; line-height: 1; }
+
+.preflight-body { overflow-y: auto; padding: 14px 18px 20px; }
+
+.preflight-section {
+  font-size: 9px;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  opacity: 0.45;
+  border-bottom: 1px dashed #555;
+  padding-bottom: 4px;
+  margin: 14px 0 8px;
+}
+
+.preflight-section:first-of-type { margin-top: 0; }
+
+.preflight-check {
+  padding: 6px 0;
+  border-bottom: 1px dotted rgba(234, 229, 206, 0.08);
+}
+
+.preflight-check:last-child { border-bottom: none; }
+
+.preflight-check-row {
+  display: grid;
+  grid-template-columns: 18px 180px 1fr;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.preflight-icon { text-align: center; font-weight: bold; }
+
+.preflight-check[data-status="ok"]    .preflight-icon { color: #6ad36a; }
+.preflight-check[data-status="warn"]  .preflight-icon { color: #e7b733; }
+.preflight-check[data-status="error"] .preflight-icon { color: #d35a5a; }
+
+.preflight-detail {
+  opacity: 0.55;
+  font-size: 11px;
+  word-break: break-word;
+}
+
+.preflight-fix {
+  margin: 6px 0 4px 26px;
+  padding: 8px 10px;
+  background: rgba(234, 229, 206, 0.05);
+  border-left: 2px solid #e7b733;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.preflight-check[data-status="error"] .preflight-fix { border-left-color: #d35a5a; }
+
+.preflight-fix-text { opacity: 0.85; }
+
+.preflight-fix-cmd {
+  display: inline-block;
+  padding: 4px 8px;
+  background: #1c1d23;
+  border: 1px solid #555;
+  color: #eae5ce;
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  font-size: 11px;
+  cursor: pointer;
+  user-select: all;
+  align-self: flex-start;
+}
+
+.preflight-fix-cmd:hover { background: #2a2b33; border-color: #eae5ce; }
+
+.preflight-fix-link {
+  align-self: flex-start;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid #eae5ce;
+  color: #eae5ce;
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+
+.preflight-fix-link:hover { background: #eae5ce; color: #2e2f38; }
+
+.preflight-diag-row {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 12px;
+  font-size: 11px;
+  padding: 3px 0;
+}
+
+.preflight-diag-key {
+  opacity: 0.45;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.preflight-diag-val {
+  opacity: 0.9;
+  word-break: break-all;
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+}

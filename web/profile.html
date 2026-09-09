@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>agent profile</title>
+  <style>
+    @font-face {
+      font-family: 'Gridbit';
+      src: url('/assets/fonts/Gridbit.otf') format('opentype');
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #2e2f38;
+      color: #eae5ce;
+      font-family: 'Gridbit', 'Courier New', monospace;
+      padding: 32px;
+      image-rendering: pixelated;
+    }
+
+    .back {
+      font-size: 12px;
+      opacity: 0.4;
+      cursor: pointer;
+      margin-bottom: 24px;
+      display: inline-block;
+    }
+    .back:hover { opacity: 0.8; }
+
+    .profile {
+      max-width: 400px;
+    }
+
+    .sprite-area {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      margin-bottom: 24px;
+    }
+
+    #sprite-canvas {
+      width: 96px;
+      height: 96px;
+      image-rendering: pixelated;
+      cursor: pointer;
+      border: 2px solid #eae5ce;
+    }
+
+    .creature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+      gap: 8px;
+      margin-top: 12px;
+      padding: 12px;
+      background: #23242c;
+      border: 1px solid #3a3b44;
+      max-height: 360px;
+      overflow-y: auto;
+    }
+    .creature-grid.hidden { display: none; }
+
+    .creature-tile {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      padding: 6px 4px;
+      cursor: pointer;
+      background: #2e2f38;
+      border: 2px solid transparent;
+      transition: border-color 0.1s, background 0.1s;
+    }
+    .creature-tile:hover { background: #34353f; border-color: #555; }
+    .creature-tile.selected { border-color: #eae5ce; background: #34353f; }
+    .creature-tile canvas {
+      width: 40px;
+      height: 40px;
+      image-rendering: pixelated;
+    }
+    .creature-tile .tile-name {
+      font-size: 9px;
+      opacity: 0.6;
+      text-transform: lowercase;
+      letter-spacing: 0.5px;
+      text-align: center;
+      width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .creature-tile.selected .tile-name { opacity: 1; }
+
+    .name-area {
+      margin-bottom: 24px;
+    }
+
+    .name-area input {
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid #eae5ce;
+      color: #eae5ce;
+      font-family: 'Gridbit', 'Courier New', monospace;
+      font-size: 28px;
+      letter-spacing: 2px;
+      outline: none;
+      width: 100%;
+      padding: 4px 0;
+    }
+
+    .level-area {
+      margin-bottom: 24px;
+    }
+
+    .level-text {
+      font-size: 16px;
+      margin-bottom: 8px;
+    }
+
+    .xp-bar {
+      width: 100%;
+      height: 8px;
+      background: #1a1b22;
+      margin-bottom: 4px;
+    }
+
+    .xp-fill {
+      height: 100%;
+      background: #eae5ce;
+    }
+
+    .xp-text {
+      font-size: 10px;
+      opacity: 0.5;
+    }
+
+    .stats {
+      margin-bottom: 24px;
+    }
+
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid #3a3b44;
+      font-size: 12px;
+    }
+
+    .stat-label {
+      opacity: 0.5;
+    }
+
+    .stat-value {
+      text-align: right;
+    }
+
+    .section-label {
+      font-size: 10px;
+      opacity: 0.3;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+      margin-top: 16px;
+    }
+
+    .folder-path {
+      font-size: 11px;
+      opacity: 0.4;
+      word-break: break-all;
+      margin-bottom: 16px;
+      padding: 8px;
+      background: #23242c;
+    }
+  </style>
+</head>
+<body>
+  <div class="back" onclick="window.location.href='/'">&lt; back</div>
+
+  <div class="profile">
+    <div class="sprite-area">
+      <canvas id="sprite-canvas" width="15" height="15"></canvas>
+      <div>
+        <div class="section-label">avatar</div>
+        <div class="section-label" id="creature-label" style="opacity: 0.6; text-transform: lowercase; letter-spacing: 0; font-size: 12px;">—</div>
+      </div>
+    </div>
+    <div class="creature-grid" id="creature-grid"></div>
+
+    <div class="name-area">
+      <div class="section-label">name</div>
+      <input type="text" id="name-input" placeholder="unnamed agent" autocomplete="off" />
+    </div>
+
+    <div class="level-area">
+      <div class="level-text" id="level-text">lv.1</div>
+      <div class="xp-bar"><div class="xp-fill" id="xp-fill"></div></div>
+      <div class="xp-text" id="xp-text">0 / 5 xp</div>
+    </div>
+
+    <div class="stats">
+      <div class="section-label">today</div>
+      <div class="stat-row"><span class="stat-label">commits</span><span class="stat-value" id="commits-today">0</span></div>
+      <div class="stat-row"><span class="stat-label">pushes</span><span class="stat-value" id="pushes-today">0</span></div>
+      <div class="stat-row"><span class="stat-label">merges</span><span class="stat-value" id="merges-today">0</span></div>
+
+      <div class="section-label">all time</div>
+      <div class="stat-row"><span class="stat-label">total commits</span><span class="stat-value" id="total-commits">0</span></div>
+      <div class="stat-row"><span class="stat-label">status</span><span class="stat-value" id="agent-status">idle</span></div>
+    </div>
+
+    <div class="section-label">working folder</div>
+    <div class="folder-path" id="folder-path"></div>
+  </div>
+
+  <script>
+    const LEVEL_TABLE = [0, 5, 15, 30, 50, 80, 120, 170, 230, 300, 380, 470, 570, 680, 800, 930, 1070, 1220, 1380, 1550];
+    function getThreshold(level) {
+      if (level <= LEVEL_TABLE.length) return LEVEL_TABLE[level - 1];
+      const lastGap = LEVEL_TABLE[LEVEL_TABLE.length - 1] - LEVEL_TABLE[LEVEL_TABLE.length - 2];
+      let total = LEVEL_TABLE[LEVEL_TABLE.length - 1];
+      for (let i = 1; i <= level - LEVEL_TABLE.length; i++) total += lastGap + (i * 50);
+      return total;
+    }
+    const API = 'http://localhost:3333';
+
+    // Get agent cwd from URL params
+    const params = new URLSearchParams(window.location.search);
+    const agentCwd = params.get('cwd') || '';
+    const agentSessionId = params.get('sid') || '';
+
+    // Load creatures list
+    let creatures = [];
+    let creatureIndex = 0;
+    let animFrame = 0;
+    let animTimer = null;
+    const imageCache = {};
+    let profile = { name: '', creatureIndex: 0, bonusXP: 0 };
+
+    async function init() {
+      // Load creatures
+      try {
+        const resp = await fetch(`${API}/api/creatures`);
+        const names = await resp.json();
+        creatures = names.map(n => ({
+          id: n,
+          frames: [`/assets/sprites/${n}-1.png`, `/assets/sprites/${n}-2.png`],
+        }));
+      } catch {
+        creatures = ['ghost', 'cat', 'skull', 'blob'].map(n => ({
+          id: n,
+          frames: [`/assets/sprites/${n}-1.png`, `/assets/sprites/${n}-2.png`],
+        }));
+      }
+
+      // Preload
+      for (const c of creatures) {
+        for (const src of c.frames) {
+          const img = new Image();
+          img.src = src + '?t=' + Date.now();
+          imageCache[src] = img;
+        }
+      }
+
+      // Load profile from daemon
+      try {
+        const pResp = await fetch(`${API}/api/profiles`);
+        const profiles = await pResp.json();
+        if (profiles[agentCwd]) profile = profiles[agentCwd];
+      } catch {}
+
+      creatureIndex = profile.creatureIndex % creatures.length;
+      document.getElementById('name-input').value = profile.name || '';
+
+      // Show folder
+      document.getElementById('folder-path').textContent = agentCwd;
+
+      // Render creature picker grid
+      renderCreatureGrid();
+
+      // Start sprite animation
+      setTimeout(startAnim, 500);
+
+      // Fetch live agent data
+      connectWS();
+    }
+
+    function startAnim() {
+      const canvas = document.getElementById('sprite-canvas');
+      const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingEnabled = false;
+
+      function draw() {
+        if (!creatures[creatureIndex]) return;
+        const src = creatures[creatureIndex].frames[animFrame];
+        const img = imageCache[src];
+        if (img && img.complete) {
+          ctx.clearRect(0, 0, 15, 15);
+          ctx.drawImage(img, 0, 0, 15, 15);
+        }
+      }
+
+      draw();
+      animTimer = setInterval(() => {
+        animFrame = (animFrame + 1) % 2;
+        draw();
+      }, 800);
+    }
+
+    function renderCreatureGrid() {
+      const gridEl = document.getElementById('creature-grid');
+      gridEl.innerHTML = '';
+      creatures.forEach((c, idx) => {
+        const tile = document.createElement('div');
+        tile.className = 'creature-tile' + (idx === creatureIndex ? ' selected' : '');
+        tile.title = c.id;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = 15;
+        canvas.height = 15;
+        const tctx = canvas.getContext('2d');
+        tctx.imageSmoothingEnabled = false;
+        const drawTile = () => {
+          const img = imageCache[c.frames[0]];
+          if (img && img.complete) {
+            tctx.clearRect(0, 0, 15, 15);
+            tctx.drawImage(img, 0, 0, 15, 15);
+          }
+        };
+        drawTile();
+        const img0 = imageCache[c.frames[0]];
+        if (img0 && !img0.complete) img0.addEventListener('load', drawTile, { once: true });
+
+        const nameEl = document.createElement('div');
+        nameEl.className = 'tile-name';
+        nameEl.textContent = c.id;
+
+        tile.appendChild(canvas);
+        tile.appendChild(nameEl);
+
+        tile.addEventListener('click', () => {
+          if (idx === creatureIndex) return;
+          creatureIndex = idx;
+          animFrame = 0;
+          document.querySelectorAll('.creature-tile').forEach(t => t.classList.remove('selected'));
+          tile.classList.add('selected');
+          document.getElementById('creature-label').textContent = c.id;
+          fetch(`${API}/api/profiles`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cwd: agentCwd, action: 'setCreature', creatureIndex }),
+          });
+        });
+
+        gridEl.appendChild(tile);
+      });
+      const current = creatures[creatureIndex];
+      if (current) document.getElementById('creature-label').textContent = current.id;
+    }
+
+    // Tap the big sprite to jump back to the current selection in the grid
+    document.getElementById('sprite-canvas').addEventListener('click', () => {
+      const selected = document.querySelector('.creature-tile.selected');
+      if (selected) selected.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+
+    // Save name on input
+    let nameTimer = null;
+    document.getElementById('name-input').addEventListener('input', (e) => {
+      clearTimeout(nameTimer);
+      nameTimer = setTimeout(() => {
+        fetch(`${API}/api/profiles`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cwd: agentCwd, action: 'setName', name: e.target.value.trim() }),
+        });
+      }, 300);
+    });
+
+    // Connect to daemon for live stats
+    function connectWS() {
+      const ws = new WebSocket('ws://localhost:3333/ws');
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'state') {
+          const agent = msg.agents.find(a => a.cwd === agentCwd || a.sessionId === agentSessionId);
+          if (agent) updateStats(agent);
+        }
+      };
+      ws.onclose = () => setTimeout(connectWS, 3000);
+    }
+
+    function updateStats(agent) {
+      document.getElementById('commits-today').textContent = agent.commitsToday || 0;
+      document.getElementById('pushes-today').textContent = agent.pushesToday || 0;
+      document.getElementById('merges-today').textContent = agent.mergesToday || 0;
+      document.getElementById('total-commits').textContent = agent.totalCommits || 0;
+      document.getElementById('agent-status').textContent = agent.currentTask || agent.status || 'idle';
+
+      const xp = (agent.totalCommits || 0) + (profile.bonusXP || 0);
+      let level = 1;
+      while (getThreshold(level + 1) <= xp) level++;
+      const curr = getThreshold(level);
+      const next = getThreshold(level + 1);
+      const progress = Math.floor(((xp - curr) / (next - curr)) * 10) * 10;
+
+      document.getElementById('level-text').textContent = `lv.${level}`;
+      document.getElementById('xp-fill').style.width = `${progress}%`;
+      document.getElementById('xp-text').textContent = `${xp} / ${next} xp`;
+    }
+
+    init();
+  </script>
+</body>
+</html>

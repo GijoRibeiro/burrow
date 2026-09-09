@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key>
+  <string>bitwise</string>
+  <key>CFBundleName</key>
+  <string>bitwise</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.cloovies.bitwise</string>
+  <key>CFBundleVersion</key>
+  <string>0.0.0</string>
+  <key>CFBundleShortVersionString</key>
+  <string>0.0.0</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <!-- Minimum macOS. Must match MACOS_TARGET in the Makefile (the swiftc
+       deployment target). Without this, Finder/Gatekeeper derive the floor
+       from the binary's Mach-O minos; setting it explicitly keeps the
+       "requires macOS X" message honest and consistent. -->
+  <key>LSMinimumSystemVersion</key>
+  <string>13.0</string>
+  <!-- Privacy prompt explanations. The daemon reads git status from each
+       monitored agent's working directory; when those live under Documents /
+       Desktop / Downloads, macOS gates access behind TCC. These strings give
+       the consent prompt a real reason instead of a bare request. (Persistence
+       of the grant across updates comes from stable signing — see the Makefile
+       SIGN_ID comment — not from these keys.) -->
+  <key>NSDocumentsFolderUsageDescription</key>
+  <string>bitwise reads git status from your agents' project folders to show their activity.</string>
+  <key>NSDesktopFolderUsageDescription</key>
+  <string>bitwise reads git status from your agents' project folders to show their activity.</string>
+  <key>NSDownloadsFolderUsageDescription</key>
+  <string>bitwise reads git status from your agents' project folders to show their activity.</string>
+  <key>LSUIElement</key>
+  <false/>
+  <!-- Sparkle auto-updater. SUFeedURL points at the appcast attached to the
+       latest release in the PUBLIC distribution repo (bitwise-releases). The
+       source repo (bitwise) is private, and GitHub release assets on a private
+       repo return 404 for unauthenticated clients — so the appcast + zip must
+       live in a public repo for Sparkle to fetch them. SUPublicEDKey is the
+       base64 EdDSA public key from `make sparkle-keys`; updates are verified
+       against it. See RELEASING.md for the full release runbook. -->
+  <key>SUFeedURL</key>
+  <string>https://github.com/GijoRibeiro/bitwise-releases/releases/latest/download/appcast.xml</string>
+  <key>SUPublicEDKey</key>
+  <string>slb0tUNW23xKelcQ+Tw6SzcqxfopRH+BtcqTu4jFXN0=</string>
+  <key>SUEnableAutomaticChecks</key>
+  <true/>
+</dict>
+</plist>

@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cloovies Sprite Editor</title>
+  <style>
+    @font-face {
+      font-family: 'Gridbit';
+      src: url('/assets/fonts/Gridbit.otf') format('opentype');
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #2e2f38;
+      color: #eae5ce;
+      font-family: 'Gridbit', 'Courier New', monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px;
+      gap: 20px;
+    }
+
+    h1 { font-size: 24px; letter-spacing: 3px; }
+
+    .editor-layout {
+      display: flex;
+      gap: 32px;
+      align-items: flex-start;
+    }
+
+    .grid-container {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    #pixel-grid {
+      display: grid;
+      grid-template-columns: repeat(15, 28px);
+      grid-template-rows: repeat(15, 28px);
+      gap: 1px;
+      background: #333;
+      border: 2px solid #555;
+      cursor: crosshair;
+      user-select: none;
+    }
+
+    .pixel { background: #2e2f38; transition: background 0.05s; }
+    .pixel.on { background: #eae5ce; }
+    .pixel:hover { outline: 2px solid #888; outline-offset: -2px; }
+
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      min-width: 220px;
+    }
+
+    .preview-section {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .label {
+      font-size: 12px;
+      opacity: 0.5;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .preview-row {
+      display: flex;
+      gap: 16px;
+      align-items: flex-end;
+    }
+
+    #preview-canvas {
+      image-rendering: pixelated;
+      border: 1px solid #555;
+      background: #2e2f38;
+    }
+
+    #anim-preview {
+      image-rendering: pixelated;
+      border: 1px solid #555;
+      background: #2e2f38;
+    }
+
+    .buttons { display: flex; flex-direction: column; gap: 8px; }
+
+    button {
+      background: #2e2f38;
+      color: #eae5ce;
+      border: 2px solid #eae5ce;
+      padding: 8px 16px;
+      font-family: 'Gridbit', 'Courier New', monospace;
+      font-size: 14px;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    button:hover { background: #eae5ce; color: #2e2f38; }
+
+    button.active-tab {
+      background: #eae5ce;
+      color: #2e2f38;
+    }
+
+    button.generate-btn {
+      border-color: #7a9f6a;
+      color: #7a9f6a;
+    }
+    button.generate-btn:hover {
+      background: #7a9f6a;
+      color: #2e2f38;
+    }
+
+    .creature-list { display: flex; flex-wrap: wrap; gap: 8px; }
+    .creature-btn { padding: 4px 8px; font-size: 11px; border-width: 1px; }
+    .creature-btn.active { background: #eae5ce; color: #2e2f38; }
+
+    .frame-tabs { display: flex; gap: 4px; }
+    .frame-tab { padding: 4px 12px; font-size: 12px; border-width: 1px; }
+
+    #status { font-size: 12px; opacity: 0.6; min-height: 18px; }
+    .coord-display { font-size: 11px; opacity: 0.4; min-height: 16px; }
+    .shortcut-help { font-size: 10px; opacity: 0.3; line-height: 1.6; }
+    .back { font-size: 12px; opacity: 0.4; cursor: pointer; margin-bottom: 16px; display: inline-block; }
+    .back:hover { opacity: 0.8; }
+  </style>
+</head>
+<body>
+  <div class="back" onclick="window.location.href='/'">&lt; back</div>
+  <h1>SPRITE EDITOR</h1>
+
+  <div class="editor-layout">
+    <div class="grid-container">
+      <div id="pixel-grid"></div>
+      <div class="coord-display" id="coords"></div>
+    </div>
+
+    <div class="sidebar">
+      <div class="preview-section">
+        <span class="label">Preview</span>
+        <div class="preview-row">
+          <canvas id="preview-canvas" width="128" height="128"></canvas>
+          <div style="display:flex;flex-direction:column;gap:4px;align-items:center;">
+            <canvas id="anim-preview" width="128" height="128"></canvas>
+            <span class="label">Animation</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="buttons">
+        <span class="label">Frame</span>
+        <div class="frame-tabs" id="frame-tabs">
+          <button class="frame-tab active-tab" onclick="switchFrame(0)">Frame 1</button>
+          <button class="frame-tab" onclick="switchFrame(1)">Frame 2</button>
+        </div>
+        <button onclick="copyFrameTo(1 - currentFrameIdx)">Copy to Frame ${currentFrameIdx === 0 ? '2' : '1'}</button>
+      </div>
+
+      <div class="buttons">
+        <span class="label">Creatures</span>
+        <div class="creature-list" id="creature-list"></div>
+        <button onclick="renameCreature()">Rename</button>
+        <button onclick="duplicateCreature()">Duplicate</button>
+        <button onclick="newCreature()">New</button>
+      </div>
+
+      <div class="buttons">
+        <span class="label">Reference</span>
+        <button onclick="document.getElementById('ref-upload').click()">Upload Reference Image</button>
+        <input type="file" id="ref-upload" accept="image/*" style="display:none" />
+        <div id="ref-container" style="display:none;position:relative;">
+          <canvas id="ref-canvas" width="128" height="128" style="image-rendering:pixelated;border:1px solid #555;opacity:0.4;"></canvas>
+          <input type="range" id="ref-opacity" min="10" max="90" value="40" style="width:128px;" />
+          <button onclick="clearRef()" style="padding:2px 8px;font-size:10px;">Remove</button>
+        </div>
+      </div>
+
+      <div class="buttons">
+        <span class="label">Tools</span>
+        <button onclick="clearGrid()">Clear</button>
+        <button onclick="flipH()">Flip H</button>
+        <button onclick="flipV()">Flip V</button>
+        <button onclick="shiftUp()">Shift Up</button>
+        <button onclick="shiftDown()">Shift Down</button>
+      </div>
+
+      <div class="buttons">
+        <span class="label">Generate</span>
+        <button class="generate-btn" onclick="generateFrame2()">Auto-Generate Frame 2</button>
+      </div>
+
+      <div class="buttons">
+        <span class="label">Save</span>
+        <button onclick="saveToProject()">Save to Project</button>
+        <button onclick="downloadBothFrames()">Download PNGs</button>
+      </div>
+
+      <div id="status"></div>
+
+      <div class="shortcut-help">
+        Click = toggle pixel<br>
+        Drag = paint on/off<br>
+        Right-click = erase<br>
+        1/2 = switch frames
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const GRID_SIZE = 15;
+    const COLOR = '#eae5ce';
+    const COLOR_R = 0xea, COLOR_G = 0xe5, COLOR_B = 0xce;
+
+    // Two frames
+    const frames = [
+      new Array(GRID_SIZE * GRID_SIZE).fill(false),
+      new Array(GRID_SIZE * GRID_SIZE).fill(false),
+    ];
+    let currentFrameIdx = 0;
+    let grid = frames[0]; // pointer to current frame
+
+    let painting = false;
+    let paintMode = true;
+    let currentCreature = null;
+    let animInterval = null;
+
+    const API = 'http://localhost:3333';
+    let creaturesList = [];
+
+    // Build pixel grid
+    const gridEl = document.getElementById('pixel-grid');
+    for (let i = 0; i < GRID_SIZE * GRID_SIZE; i++) {
+      const pixel = document.createElement('div');
+      pixel.className = 'pixel';
+      pixel.dataset.index = i;
+
+      pixel.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        painting = true;
+        paintMode = e.button === 2 ? false : !grid[i];
+        grid[i] = paintMode;
+        updatePixel(i);
+        updatePreview();
+      });
+
+      pixel.addEventListener('mouseenter', () => {
+        const x = i % GRID_SIZE;
+        const y = Math.floor(i / GRID_SIZE);
+        document.getElementById('coords').textContent = `x:${x} y:${y}`;
+        if (painting) {
+          grid[i] = paintMode;
+          updatePixel(i);
+          updatePreview();
+        }
+      });
+
+      gridEl.appendChild(pixel);
+    }
+
+    document.addEventListener('mouseup', () => { painting = false; });
+    gridEl.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      if (e.key === '1') switchFrame(0);
+      if (e.key === '2') switchFrame(1);
+    });
+
+    // Build creature buttons — loaded from API
+    async function refreshCreatureList() {
+      try {
+        const resp = await fetch(`${API}/api/creatures`);
+        creaturesList = await resp.json();
+      } catch {
+        creaturesList = ['beholder', 'ghost', 'cat', 'skull', 'blob'];
+      }
+      const listEl = document.getElementById('creature-list');
+      listEl.innerHTML = '';
+      creaturesList.forEach(name => {
+        const btn = document.createElement('button');
+        btn.className = 'creature-btn';
+        if (name === currentCreature) btn.classList.add('active');
+        btn.textContent = name;
+        btn.onclick = () => loadCreature(name, btn);
+        listEl.appendChild(btn);
+      });
+    }
+    refreshCreatureList();
+
+    // --- Frame switching ---
+    function switchFrame(idx) {
+      currentFrameIdx = idx;
+      grid = frames[idx];
+      // Update tab buttons
+      document.querySelectorAll('.frame-tab').forEach((btn, i) => {
+        btn.classList.toggle('active-tab', i === idx);
+      });
+      updateAllPixels();
+    }
+
+    function copyFrameTo(targetIdx) {
+      for (let i = 0; i < GRID_SIZE * GRID_SIZE; i++) {
+        frames[targetIdx][i] = frames[currentFrameIdx][i];
+      }
+      setStatus(`Copied frame ${currentFrameIdx + 1} to frame ${targetIdx + 1}`);
+    }
+
+    // --- Pixel ops ---
+    function updatePixel(i) {
+      gridEl.children[i].className = grid[i] ? 'pixel on' : 'pixel';
+    }
+
+    function updateAllPixels() {
+      for (let i = 0; i < grid.length; i++) updatePixel(i);
+      updatePreview();
+    }
+
+    function updatePreview() {
+      // Current frame preview
+      const canvas = document.getElementById('preview-canvas');
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#2e2f38';
+      ctx.fillRect(0, 0, 128, 128);
+      const scale = 128 / GRID_SIZE;
+      for (let i = 0; i < grid.length; i++) {
+        if (grid[i]) {
+          const x = i % GRID_SIZE;
+          const y = Math.floor(i / GRID_SIZE);
+          ctx.fillStyle = COLOR;
+          ctx.fillRect(x * scale, y * scale, scale, scale);
+        }
+      }
+    }
+
+    // --- Animation preview ---
+    function startAnimPreview() {
+      if (animInterval) clearInterval(animInterval);
+      let showFrame = 0;
+      const animCanvas = document.getElementById('anim-preview');
+      const actx = animCanvas.getContext('2d');
+      const scale = 128 / GRID_SIZE;
+
+      function drawAnimFrame() {
+        actx.fillStyle = '#2e2f38';
+        actx.fillRect(0, 0, 128, 128);
+        const f = frames[showFrame];
+        for (let i = 0; i < f.length; i++) {
+          if (f[i]) {
+            const x = i % GRID_SIZE;
+            const y = Math.floor(i / GRID_SIZE);
+            actx.fillStyle = COLOR;
+            actx.fillRect(x * scale, y * scale, scale, scale);
+          }
+        }
+        showFrame = (showFrame + 1) % 2;
+      }
+
+      drawAnimFrame();
+      animInterval = setInterval(drawAnimFrame, 800);
+    }
+
+    startAnimPreview();
+
+    // --- Load creature ---
+    function loadCreature(name, btnEl) {
+      currentCreature = name;
+      document.querySelectorAll('.creature-btn').forEach(b => b.classList.remove('active'));
+      if (btnEl) btnEl.classList.add('active');
+
+      let loaded = 0;
+      for (let f = 0; f < 2; f++) {
+        const img = new Image();
+        const frameIdx = f;
+        img.onload = () => {
+          const c = document.createElement('canvas');
+          c.width = GRID_SIZE;
+          c.height = GRID_SIZE;
+          const ctx = c.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          const data = ctx.getImageData(0, 0, GRID_SIZE, GRID_SIZE).data;
+          for (let i = 0; i < GRID_SIZE * GRID_SIZE; i++) {
+            frames[frameIdx][i] = data[i * 4 + 3] > 128 && data[i * 4] > 128;
+          }
+          loaded++;
+          if (loaded === 2) {
+            grid = frames[currentFrameIdx];
+            updateAllPixels();
+            startAnimPreview();
+            setStatus(`Loaded ${name} (both frames)`);
+          }
+        };
+        img.src = `/assets/sprites/${name}-${f + 1}.png?t=${Date.now()}`;
+      }
+    }
+
+    // --- Grid tools ---
+    function clearGrid() { grid.fill(false); updateAllPixels(); }
+
+    function flipH() {
+      for (let y = 0; y < GRID_SIZE; y++) {
+        for (let x = 0; x < Math.floor(GRID_SIZE / 2); x++) {
+          const l = y * GRID_SIZE + x;
+          const r = y * GRID_SIZE + (GRID_SIZE - 1 - x);
+          [grid[l], grid[r]] = [grid[r], grid[l]];
+        }
+      }
+      updateAllPixels();
+    }
+
+    function flipV() {
+      for (let y = 0; y < Math.floor(GRID_SIZE / 2); y++) {
+        for (let x = 0; x < GRID_SIZE; x++) {
+          const t = y * GRID_SIZE + x;
+          const b = (GRID_SIZE - 1 - y) * GRID_SIZE + x;
+          [grid[t], grid[b]] = [grid[b], grid[t]];
+        }
+      }
+      updateAllPixels();
+    }
+
+    function shiftUp() {
+      for (let y = 0; y < GRID_SIZE - 1; y++)
+        for (let x = 0; x < GRID_SIZE; x++)
+          grid[y * GRID_SIZE + x] = grid[(y + 1) * GRID_SIZE + x];
+      for (let x = 0; x < GRID_SIZE; x++)
+        grid[(GRID_SIZE - 1) * GRID_SIZE + x] = false;
+      updateAllPixels();
+    }
+
+    function shiftDown() {
+      for (let y = GRID_SIZE - 1; y > 0; y--)
+        for (let x = 0; x < GRID_SIZE; x++)
+          grid[y * GRID_SIZE + x] = grid[(y - 1) * GRID_SIZE + x];
+      for (let x = 0; x < GRID_SIZE; x++)
+        grid[x] = false;
+      updateAllPixels();
+    }
+
+    // --- Auto-generate frame 2 ---
+    function generateFrame2() {
+      // Copy frame 1 to frame 2, then apply subtle idle animation:
+      // Shift body down 1px (bob effect)
+      for (let i = 0; i < GRID_SIZE * GRID_SIZE; i++) {
+        frames[1][i] = false;
+      }
+      for (let y = 0; y < GRID_SIZE - 1; y++) {
+        for (let x = 0; x < GRID_SIZE; x++) {
+          if (frames[0][y * GRID_SIZE + x]) {
+            frames[1][(y + 1) * GRID_SIZE + x] = true;
+          }
+        }
+      }
+      // Switch to frame 2 to show result
+      switchFrame(1);
+      startAnimPreview();
+      setStatus('Generated frame 2 (bob down 1px from frame 1)');
+    }
+
+    // --- Export ---
+    function makeImageData(frameData) {
+      const canvas = document.createElement('canvas');
+      canvas.width = GRID_SIZE;
+      canvas.height = GRID_SIZE;
+      const ctx = canvas.getContext('2d');
+      const imageData = ctx.createImageData(GRID_SIZE, GRID_SIZE);
+      for (let i = 0; i < frameData.length; i++) {
+        if (frameData[i]) {
+          const offset = i * 4;
+          imageData.data[offset] = COLOR_R;
+          imageData.data[offset + 1] = COLOR_G;
+          imageData.data[offset + 2] = COLOR_B;
+          imageData.data[offset + 3] = 255;
+        }
+      }
+      ctx.putImageData(imageData, 0, 0);
+      return canvas.toDataURL('image/png');
+    }
+
+    function downloadCurrentFrame() {
+      const name = currentCreature || 'sprite';
+      const link = document.createElement('a');
+      link.download = `${name}-${currentFrameIdx + 1}.png`;
+      link.href = makeImageData(frames[currentFrameIdx]);
+      link.click();
+      setStatus(`Downloaded ${name}-${currentFrameIdx + 1}.png`);
+    }
+
+    async function saveToProject() {
+      if (!currentCreature) {
+        setStatus('Load a creature first');
+        return;
+      }
+      try {
+        for (let f = 0; f < 2; f++) {
+          const data = makeImageData(frames[f]);
+          const resp = await fetch(`${API}/api/sprite`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              filename: `${currentCreature}-${f + 1}.png`,
+              data: data,
+            }),
+          });
+          if (!resp.ok) throw new Error(await resp.text());
+        }
+        setStatus(`Saved ${currentCreature} — refresh main page`);
+      } catch (e) {
+        setStatus('Save failed: ' + e.message);
+      }
+    }
+
+    async function renameCreature() {
+      if (!currentCreature) { setStatus('Load a creature first'); return; }
+      const newName = prompt('New name for ' + currentCreature + ':', currentCreature);
+      if (!newName || newName === currentCreature) return;
+      try {
+        const resp = await fetch(`${API}/api/creatures`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'rename', name: currentCreature, newName }),
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        currentCreature = newName;
+        await refreshCreatureList();
+        setStatus(`Renamed to ${newName}`);
+      } catch (e) {
+        setStatus('Rename failed: ' + e.message);
+      }
+    }
+
+    async function duplicateCreature() {
+      if (!currentCreature) { setStatus('Load a creature first'); return; }
+      const newName = prompt('Name for the copy:', currentCreature + '-copy');
+      if (!newName) return;
+      try {
+        const resp = await fetch(`${API}/api/creatures`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'duplicate', name: currentCreature, newName }),
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        currentCreature = newName;
+        await refreshCreatureList();
+        setStatus(`Duplicated as ${newName} — edit it now`);
+      } catch (e) {
+        setStatus('Duplicate failed: ' + e.message);
+      }
+    }
+
+    function newCreature() {
+      const name = prompt('Name for new creature:');
+      if (!name) return;
+      currentCreature = name;
+      frames[0].fill(false);
+      frames[1].fill(false);
+      switchFrame(0);
+      refreshCreatureList();
+      setStatus(`New creature: ${name} — draw it and Save to Project`);
+    }
+
+    function downloadBothFrames() {
+      const name = currentCreature || 'sprite';
+      const link1 = document.createElement('a');
+      link1.download = `${name}-1.png`;
+      link1.href = makeImageData(frames[0]);
+      link1.click();
+
+      setTimeout(() => {
+        const link2 = document.createElement('a');
+        link2.download = `${name}-2.png`;
+        link2.href = makeImageData(frames[1]);
+        link2.click();
+        setStatus(`Downloaded ${name}-1.png and ${name}-2.png`);
+      }, 500);
+    }
+
+    // --- Reference image ---
+    document.getElementById('ref-upload').addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const img = new Image();
+        img.onload = () => {
+          const container = document.getElementById('ref-container');
+          container.style.display = 'block';
+          const canvas = document.getElementById('ref-canvas');
+          const ctx = canvas.getContext('2d');
+          ctx.clearRect(0, 0, 128, 128);
+          // Draw scaled to fit 128x128
+          const scale = Math.min(128 / img.width, 128 / img.height);
+          const w = img.width * scale;
+          const h = img.height * scale;
+          ctx.drawImage(img, (128 - w) / 2, (128 - h) / 2, w, h);
+          setStatus('Reference loaded — draw over it');
+        };
+        img.src = ev.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+
+    document.getElementById('ref-opacity').addEventListener('input', (e) => {
+      document.getElementById('ref-canvas').style.opacity = e.target.value / 100;
+    });
+
+    function clearRef() {
+      document.getElementById('ref-container').style.display = 'none';
+      const ctx = document.getElementById('ref-canvas').getContext('2d');
+      ctx.clearRect(0, 0, 128, 128);
+    }
+
+    function setStatus(msg) {
+      document.getElementById('status').textContent = msg;
+      setTimeout(() => { document.getElementById('status').textContent = ''; }, 5000);
+    }
+
+    // Init
+    updatePreview();
+  </script>
+</body>
+</html>

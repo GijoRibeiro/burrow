@@ -1,0 +1,25 @@
+.superpowers/
+.worktrees/
+.claude/
+.firecrawl/
+node_modules/
+bin/
+build/
+third_party/
+/clooviesd
+web/dist/
+web/test-results/
+web/playwright-report/
+.DS_Store
+docs/.DS_Store
+docs/superpowers/.DS_Store
+web/.node_modules-backup-*/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.log
