@@ -1133,3 +1133,142 @@ test("local image references show thumbnails and an accessible zoom view", async
   await expect(pane.locator(".xterm-screen")).toBeVisible();
   await expect(preview).not.toBeVisible();
 });
+
+test("sidebar context menus manage background terminals and project actions", async ({
+  page,
+  request,
+}, info) => {
+  const path = join(process.env.CLOOVIES_E2E_ROOT!, "Menus");
+  mkdirSync(path);
+  execFileSync("git", ["init", "-b", "main", path]);
+  execFileSync("git", [
+    "-C",
+    path,
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@localhost",
+    "commit",
+    "--allow-empty",
+    "-m",
+    "Initial",
+  ]);
+  await page.goto("/");
+  await add(page, "Menus", "Menu shell");
+  const project = page.locator(".project-group").filter({
+    has: page.getByRole("button", { name: "Toggle Menus", exact: true }),
+  });
+  await expect(
+    project.getByRole("button", {
+      name: "Create worktree in Menus",
+      exact: true,
+    }),
+  ).toHaveText("+");
+  await expect(project.locator(".project-actions button")).toHaveCount(1);
+  const session = (
+    await (await request.get("/api/workspace")).json()
+  ).terminals.find((t: { name: string }) => t.name === "Menu shell");
+  const alive = () => tmux("has-session", "-t", `=cw-${session.id}`);
+  await project
+    .getByRole("button", { name: "Hide Menu shell", exact: true })
+    .click({ button: "right" });
+  let menu = page.getByRole("menu", { name: "Actions for Menu shell" });
+  await expect(menu).toBeVisible();
+  await page.screenshot({
+    path: info.outputPath("terminal-context-menu.png"),
+    animations: "disabled",
+  });
+  await menu
+    .getByRole("menuitem", { name: "Hide terminal", exact: true })
+    .click();
+  await expect(
+    page.getByRole("region", { name: "Menu shell terminal", exact: true }),
+  ).toHaveCount(0);
+  expect(alive()).toBe("");
+  await project
+    .getByRole("button", { name: "Show Menu shell", exact: true })
+    .click({ button: "right" });
+  await menu
+    .getByRole("menuitem", { name: "Rename terminal…", exact: true })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByLabel("Name", { exact: true })
+    .fill("Background shell");
+  await page.getByRole("button", { name: "Save name", exact: true }).click();
+  const toggle = project.getByRole("button", {
+    name: "Show Background shell",
+    exact: true,
+  });
+  await toggle.focus();
+  await toggle.press("Shift+F10");
+  menu = page.getByRole("menu", { name: "Actions for Background shell" });
+  await expect(menu).toBeVisible();
+  await page.keyboard.press("End");
+  await expect(
+    menu.getByRole("menuitem", { name: "Terminate terminal…" }),
+  ).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+  await expect(toggle).toBeFocused();
+  await toggle.click({ button: "right" });
+  await menu.getByRole("menuitem", { name: "Terminate terminal…" }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Cancel" })
+    .click();
+  expect(alive()).toBe("");
+  const stop = async () => {
+    await toggle.click({ button: "right" });
+    await menu.getByRole("menuitem", { name: "Terminate terminal…" }).click();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Stop terminal", exact: true })
+      .click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(
+      project.locator(`[data-session-id="${session.id}"] .visibility-label`),
+    ).toHaveText("stopped");
+  };
+  await stop();
+  await toggle.click({ button: "right" });
+  await menu
+    .getByRole("menuitem", { name: "Start terminal", exact: true })
+    .click();
+  await expect(
+    project.locator(`[data-session-id="${session.id}"] .visibility-label`),
+  ).toHaveText("background");
+  expect(alive()).toBe("");
+  await stop();
+  await toggle.click({ button: "right" });
+  await menu.getByRole("menuitem", { name: "Remove terminal…" }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Remove", exact: true })
+    .click();
+  await expect(toggle).toHaveCount(0);
+  await project
+    .getByRole("button", { name: "Toggle Menus", exact: true })
+    .click({ button: "right" });
+  const projectMenu = page.getByRole("menu", { name: "Actions for Menus" });
+  await expect(
+    projectMenu.getByRole("menuitem", { name: "Create worktree…" }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: info.outputPath("project-context-menu.png"),
+    animations: "disabled",
+  });
+  await projectMenu
+    .getByRole("menuitem", { name: "Remove project from workspace…" })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Remove project", exact: true })
+    .click();
+  await expect(project).toHaveCount(0);
+  expect(
+    execFileSync("git", ["-C", path, "rev-parse", "--is-inside-work-tree"], {
+      encoding: "utf8",
+    }).trim(),
+  ).toBe("true");
+});

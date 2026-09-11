@@ -1,3 +1,4 @@
+import { contextMenu } from "./context-menu";
 import { creature } from "./creature";
 import { badge, button, dialog, el } from "./dom";
 import { ids, type Tree } from "./layout";
@@ -21,6 +22,10 @@ export interface SidebarContext {
   hide(id: string): void;
   show(id: string): void;
   removeTerminal(id: string): Promise<void>;
+  renameTerminal(id: string): void;
+  stopTerminal(id: string): void;
+  restartTerminal(id: string): void;
+  focusTerminal(id: string): void;
 }
 export function renderProjectList(ctx: SidebarContext): void {
   ctx.projects.replaceChildren();
@@ -78,15 +83,48 @@ export function renderProjectList(ctx: SidebarContext): void {
         `Create worktree in ${p.name}`,
         () => ctx.newWorktree(p),
         "icon-button",
-        "⑂+",
-      ),
-      button(
-        `Remove ${p.name} from workspace`,
-        () => ctx.removeProject(p),
-        "icon-button subtle",
-        "×",
+        "+",
       ),
     );
+    const openProjectMenu = (x: number, y: number) =>
+      contextMenu(
+        p.name,
+        x,
+        y,
+        [
+          { label: "Create worktree…", run: () => ctx.newWorktree(p) },
+          { label: "New terminal…", run: () => ctx.newTerminal(p.id, p.path) },
+          {
+            label: "Remove project from workspace…",
+            run: () => ctx.removeProject(p),
+            danger: true,
+          },
+        ],
+        () =>
+          ctx.projects
+            .querySelector<HTMLButtonElement>(
+              `[data-project-id="${p.id}"] .project-label`,
+            )
+            ?.focus({ preventScroll: true }),
+        "var(--ink)",
+      );
+    group.dataset.projectId = p.id;
+    select.setAttribute("aria-haspopup", "menu");
+    heading.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openProjectMenu(event.clientX, event.clientY);
+    });
+    select.addEventListener("keydown", (event) => {
+      if (
+        event.key === "ContextMenu" ||
+        (event.shiftKey && event.key === "F10")
+      ) {
+        event.preventDefault();
+        const bounds = select.getBoundingClientRect();
+        openProjectMenu(bounds.left + 12, bounds.bottom);
+      }
+    });
     heading.append(select, controls);
     group.append(heading, body);
     {
@@ -189,23 +227,78 @@ function sessionRow(
           : t.status,
     ),
   );
+  const remove = () =>
+    dialog(
+      "Remove terminal?",
+      `Remove ${t.name} from your workspace.`,
+      [],
+      "Remove",
+      () => ctx.removeTerminal(t.id),
+      true,
+    );
+  const open = (x: number, y: number) => {
+    const actions = [
+      {
+        label: visible.has(t.id) ? "Hide terminal" : "Show terminal",
+        run: () => (visible.has(t.id) ? ctx.hide(t.id) : ctx.show(t.id)),
+      },
+      {
+        label: "Focus terminal",
+        run: () => {
+          ctx.show(t.id);
+          ctx.focusTerminal(t.id);
+        },
+      },
+      { label: "Rename terminal…", run: () => ctx.renameTerminal(t.id) },
+    ];
+    if (t.status !== "running")
+      actions.push({
+        label: "Start terminal",
+        run: () => ctx.restartTerminal(t.id),
+      });
+    contextMenu(
+      t.name,
+      x,
+      y,
+      [
+        ...actions,
+        t.status === "stopped"
+          ? { label: "Remove terminal…", run: remove, danger: true }
+          : {
+              label: "Terminate terminal…",
+              run: () => ctx.stopTerminal(t.id),
+              danger: true,
+            },
+      ],
+      () =>
+        ctx.projects
+          .querySelector<HTMLButtonElement>(
+            `[data-session-id="${t.id}"] .session-toggle`,
+          )
+          ?.focus({ preventScroll: true }),
+      ctx.terminalColor(t.id),
+    );
+  };
+  toggle.setAttribute("aria-haspopup", "menu");
+  row.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    open(event.clientX, event.clientY);
+  });
+  toggle.addEventListener("keydown", (event) => {
+    if (
+      event.key === "ContextMenu" ||
+      (event.shiftKey && event.key === "F10")
+    ) {
+      event.preventDefault();
+      const bounds = toggle.getBoundingClientRect();
+      open(bounds.left + 12, bounds.bottom);
+    }
+  });
   row.append(toggle);
   if (t.status === "stopped")
     row.append(
-      button(
-        `Remove terminal ${t.name}`,
-        () =>
-          dialog(
-            "Remove terminal?",
-            "Remove this stopped session from your workspace.",
-            [],
-            "Remove",
-            () => ctx.removeTerminal(t.id),
-            true,
-          ),
-        "icon-button subtle",
-        "×",
-      ),
+      button(`Remove terminal ${t.name}`, remove, "icon-button subtle", "×"),
     );
   return row;
 }

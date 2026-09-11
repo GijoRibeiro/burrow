@@ -350,6 +350,10 @@ class WorkspaceApp {
       },
       hide: (id) => this.hide(id),
       show: (id) => this.show(id),
+      renameTerminal: (id) => this.rename(id),
+      stopTerminal: (id) => this.stop(id),
+      restartTerminal: (id) => this.restart(id),
+      focusTerminal: (id) => this.focusPane(id),
       removeTerminal: async (id) => {
         await this.mutate(`/terminals/${id}`, "PATCH", { action: "remove" });
         this.tree = remove(this.tree, id);
@@ -851,7 +855,8 @@ class WorkspaceApp {
     }
   }
   private shortcut(e: KeyboardEvent): void {
-    if (e.isComposing || document.querySelector("dialog[open]")) return;
+    if (e.isComposing || document.querySelector('dialog[open], [role="menu"]'))
+      return;
     if (e.key === "Tab" && !e.metaKey && !e.ctrlKey && !e.altKey) {
       const order = ids(this.tree);
       if (order.length > 1) {

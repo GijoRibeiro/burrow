@@ -47,6 +47,8 @@ CLOOVIES_BACKEND_URL=http://127.0.0.1:4340 npm run dev
 7. Agent view renders local PNG, JPEG, GIF, and WebP references as thumbnails. Click a thumbnail to enlarge it, choose Fit or Actual size, and press Escape to close. Images must be inside the terminal’s checkout.
 8. Type in the terminal directly, or use its message input. Enter sends; Shift+Enter inserts a newline. Scroll in the terminal for history, and press Q to leave history mode. Hold Shift while dragging to select terminal text, then copy normally.
 
+Right-click a sidebar terminal for Show/Hide, Focus, Rename, Terminate, and (when stopped) Start or Remove. Right-click a project heading to create a worktree, start a terminal, or remove the project from the workspace. The heading’s **+** creates a worktree. Shift+F10 opens the same menus from the keyboard; arrows navigate and Escape closes.
+
 **Hide** only removes the pane from view. **Stop** ends its shell and running processes after confirmation. **Start** opens a fresh shell in a stopped or exited session. Removing a worktree refuses dirty checkouts and worktrees with active terminal sessions; removing a project never deletes its files.
 
 Tab moves to the next visible pane; Shift+Tab moves to the previous one, wrapping around. This also works in focused view. Dialogs retain normal Tab navigation.
