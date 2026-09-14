@@ -1272,3 +1272,200 @@ test("sidebar context menus manage background terminals and project actions", as
     }).trim(),
   ).toBe("true");
 });
+
+test("Linear picker creates an editable ticket branch and keeps agent context", async ({
+  page,
+  request,
+}, info) => {
+  const issue = {
+    id: "fixture-issue",
+    identifier: "ENG-42",
+    title: "Fix keyboard navigation",
+    url: "https://linear.app/fixture/issue/ENG-42/fix",
+    description: "Preserve focus when closing menus.",
+    state: { name: "Todo" },
+  };
+  let connected = false,
+    linkedPath = "";
+  await page.route("**/api/workspace/linear", async (route) => {
+    if (route.request().method() === "POST") {
+      expect(route.request().postDataJSON()).toEqual({ apiKey: "fixture-key" });
+      connected = true;
+    }
+    await route.fulfill({ json: { connected } });
+  });
+  await page.route("**/api/workspace/linear/issues?*", (route) =>
+    route.fulfill({ json: [issue] }),
+  );
+  // Stub the external Linear boundary; worktree and terminal operations still use real Git/tmux.
+  await page.route("**/api/workspace/projects/*/worktrees", async (route) => {
+    const input = route.request().postDataJSON();
+    expect(input.issueID).toBe(issue.id);
+    const response = await request.post(route.request().url(), {
+      data: { name: input.name, base: input.base },
+    });
+    expect(response.ok()).toBeTruthy();
+    const tree = await response.json();
+    linkedPath = tree.path;
+    await route.fulfill({ json: { ...tree, issue } });
+  });
+  await page.route("**/api/workspace", async (route) => {
+    const response = await request.get(route.request().url());
+    const state = await response.json();
+    for (const p of state.projects)
+      for (const tree of p.worktrees)
+        if (tree.path === linkedPath) tree.issue = issue;
+    await route.fulfill({ json: state });
+  });
+  await page.goto("/");
+  if (!(await (await request.get("/api/workspace")).json()).projects.length)
+    await add(page, "Checkout", "Linear setup");
+  await page
+    .getByRole("button", { name: "Create worktree in Checkout", exact: true })
+    .click();
+  const dialog = page.getByRole("dialog");
+  await dialog
+    .getByRole("button", { name: "From Linear", exact: true })
+    .click();
+  await expect(
+    dialog.getByRole("button", { name: "Create worktree", exact: true }),
+  ).toBeDisabled();
+  await dialog.getByLabel("Linear API key").fill("fixture-key");
+  await dialog
+    .getByRole("button", { name: "Connect Linear", exact: true })
+    .click();
+  await dialog.getByLabel("Search Linear issues").fill("ENG-42");
+  await dialog
+    .getByRole("button", {
+      name: "ENG-42: Fix keyboard navigation",
+      exact: true,
+    })
+    .click();
+  await expect(dialog.getByLabel("Worktree and branch name")).toHaveValue(
+    "eng-42-fix-keyboard-navigation",
+  );
+  await dialog
+    .getByLabel("Worktree and branch name")
+    .fill("eng-42-custom-name");
+  await page.screenshot({
+    path: info.outputPath("linear-worktree-picker.png"),
+    animations: "disabled",
+  });
+  await dialog
+    .getByRole("button", { name: "Create worktree", exact: true })
+    .click();
+  await expect(dialog).toHaveCount(0);
+  const link = page.getByRole("link", { name: "Open ENG-42 in Linear" });
+  await expect(link).toBeVisible();
+  await page.reload();
+  await expect(link).toBeVisible();
+  await page
+    .getByRole("button", {
+      name: "New terminal in Checkout eng-42-custom-name",
+    })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByLabel("Terminal name", { exact: true })
+    .fill("Ticket agent");
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Start terminal", exact: true })
+    .click();
+  const draft = page.getByRole("textbox", {
+    name: "Message to Ticket agent",
+    exact: true,
+  });
+  await expect(draft).toHaveValue(
+    `Work on ENG-42: Fix keyboard navigation\n${issue.url}\n\n${issue.description}`,
+  );
+});
+
+test("first-run setup offers installation and detects readiness", async ({
+  page,
+}, info) => {
+  let ready = false;
+  await page.addInitScript(() => {
+    Object.assign(window, {
+      webkit: {
+        messageHandlers: {
+          installTools: {
+            postMessage: async (tool: string) => {
+              (window as any).installedTool = tool;
+              return "opened";
+            },
+          },
+        },
+      },
+    });
+  });
+  await page.route("**/api/workspace", (route) =>
+    route.fulfill({
+      json: { version: 1, projects: [], terminals: [], tmuxAvailable: true },
+    }),
+  );
+  await page.route("**/api/workspace/setup", (route) =>
+    route.fulfill({
+      json: {
+        platform: "darwin",
+        ready,
+        git: ready,
+        tmux: ready,
+        claude: false,
+        codex: false,
+      },
+    }),
+  );
+  await page.goto("/");
+  const dialog = page.getByRole("dialog", { name: "Workspace setup" });
+  await expect(dialog).toBeVisible();
+  await expect(
+    dialog.getByRole("button", { name: "Start using the workspace" }),
+  ).toBeDisabled();
+  await dialog.getByRole("button", { name: "Install required tools" }).click();
+  await expect
+    .poll(() => page.evaluate(() => (window as any).installedTool))
+    .toBe("required");
+  ready = true;
+  await dialog.getByRole("button", { name: "Check again" }).click();
+  await expect(
+    dialog.getByRole("button", { name: "Start using the workspace" }),
+  ).toBeEnabled();
+  await page.screenshot({
+    path: info.outputPath("first-run-setup.png"),
+    animations: "disabled",
+  });
+  await dialog
+    .getByRole("button", { name: "Start using the workspace" })
+    .click();
+  await page.reload();
+  await expect(dialog).toHaveCount(0);
+});
+
+test("launch buttons share a row and wrap only in narrow panes", async ({
+  page,
+}, info) => {
+  await page.goto("/");
+  await add(page, "Checkout", "Wrapping launcher");
+  const pane = page.getByRole("region", {
+    name: "Wrapping launcher terminal",
+    exact: true,
+  });
+  await pane.getByRole("button", { name: "Agent view", exact: true }).click();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const buttons = pane.locator(".agent-launch-actions button");
+  await expect(buttons).toHaveCount(3);
+  const y = () =>
+    buttons.evaluateAll((rows) =>
+      rows.map((row) => Math.round(row.getBoundingClientRect().y)),
+    );
+  await expect.poll(y).toEqual(expect.arrayContaining([expect.any(Number)]));
+  expect(new Set(await y()).size).toBe(1);
+  await expect(page.locator(".brand-name")).toHaveCSS("font-family", /Gridbit/);
+  await page.screenshot({
+    path: info.outputPath("launch-buttons-wide.png"),
+    animations: "disabled",
+  });
+  await page.setViewportSize({ width: 400, height: 900 });
+  await expect.poll(async () => new Set(await y()).size).toBeGreaterThan(1);
+});

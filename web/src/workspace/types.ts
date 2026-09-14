@@ -1,4 +1,13 @@
+export interface LinearIssue {
+  id: string;
+  identifier: string;
+  title: string;
+  url: string;
+  description?: string;
+  state: { name: string };
+}
 export interface Worktree {
+  issue?: LinearIssue;
   path: string;
   name: string;
   branch: string;

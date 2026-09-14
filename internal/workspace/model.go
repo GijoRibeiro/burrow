@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/gijo/cloovies/internal/linear"
 )
 
 type Project struct {
@@ -25,10 +27,11 @@ type Project struct {
 	Error     string     `json:"error,omitempty"`
 }
 type Worktree struct {
-	Path   string `json:"path"`
-	Name   string `json:"name"`
-	Branch string `json:"branch"`
-	Main   bool   `json:"main"`
+	Issue  *linear.WorktreeIssue `json:"issue,omitempty"`
+	Path   string                `json:"path"`
+	Name   string                `json:"name"`
+	Branch string                `json:"branch"`
+	Main   bool                  `json:"main"`
 }
 type Terminal struct {
 	Program   string    `json:"program,omitempty"`
@@ -40,10 +43,11 @@ type Terminal struct {
 	Status    string    `json:"status"`
 }
 type State struct {
-	Version       int        `json:"version"`
-	Projects      []Project  `json:"projects"`
-	Terminals     []Terminal `json:"terminals"`
-	TmuxAvailable bool       `json:"tmuxAvailable"`
+	WorktreeIssues map[string]linear.WorktreeIssue `json:"worktreeIssues,omitempty"`
+	Version        int                             `json:"version"`
+	Projects       []Project                       `json:"projects"`
+	Terminals      []Terminal                      `json:"terminals"`
+	TmuxAvailable  bool                            `json:"tmuxAvailable"`
 }
 type Manager struct {
 	mu     sync.Mutex
@@ -175,6 +179,10 @@ func (m *Manager) Snapshot() State {
 	s := m.state
 	s.Projects = append([]Project{}, s.Projects...)
 	s.Terminals = append([]Terminal{}, s.Terminals...)
+	s.WorktreeIssues = make(map[string]linear.WorktreeIssue, len(m.state.WorktreeIssues))
+	for path, issue := range m.state.WorktreeIssues {
+		s.WorktreeIssues[path] = issue
+	}
 	m.mu.Unlock()
 	_, err := exec.LookPath("tmux")
 	s.TmuxAvailable = err == nil
@@ -201,6 +209,12 @@ func (m *Manager) Snapshot() State {
 	for i := range s.Projects {
 		p := &s.Projects[i]
 		p.Worktrees, err = listWorktrees(p.Path)
+		for j := range p.Worktrees {
+			if issue, ok := s.WorktreeIssues[p.Worktrees[j].Path]; ok {
+				copy := issue
+				p.Worktrees[j].Issue = &copy
+			}
+		}
 		if err != nil {
 			p.Error = err.Error()
 			p.Worktrees = []Worktree{}
@@ -276,6 +290,9 @@ func listWorktrees(root string) ([]Worktree, error) {
 	return result, nil
 }
 func (m *Manager) CreateWorktree(projectID, name, base string) (Worktree, error) {
+	return m.createWorktree(projectID, name, base, nil)
+}
+func (m *Manager) createWorktree(projectID, name, base string, issue *linear.WorktreeIssue) (Worktree, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	p, err := m.project(projectID)
@@ -331,7 +348,30 @@ func (m *Manager) CreateWorktree(projectID, name, base string) (Worktree, error)
 	if _, err = git(p.Path, "worktree", "add", "-b", name, "--", path, commit); err != nil {
 		return Worktree{}, err
 	}
-	return Worktree{Path: path, Name: name, Branch: name}, nil
+	if issue != nil || m.state.WorktreeIssues[path].ID != "" {
+		if m.state.WorktreeIssues == nil {
+			m.state.WorktreeIssues = map[string]linear.WorktreeIssue{}
+		}
+		previous, existed := m.state.WorktreeIssues[path]
+		if issue != nil {
+			m.state.WorktreeIssues[path] = *issue
+		} else {
+			delete(m.state.WorktreeIssues, path)
+		}
+		if err := m.save(); err != nil {
+			if existed {
+				m.state.WorktreeIssues[path] = previous
+			} else {
+				delete(m.state.WorktreeIssues, path)
+			}
+			// Roll back only the fresh checkout if Git confirms it is still clean.
+			if _, cleanup := git(p.Path, "worktree", "remove", "--", path); cleanup == nil {
+				git(p.Path, "branch", "-d", "--", name)
+			}
+			return Worktree{}, fmt.Errorf("could not save the Linear link: %w", err)
+		}
+	}
+	return Worktree{Path: path, Name: name, Branch: name, Issue: issue}, nil
 }
 func (m *Manager) RemoveWorktree(projectID, path string) error {
 	m.mu.Lock()
@@ -365,6 +405,10 @@ func (m *Manager) RemoveWorktree(projectID, path string) error {
 		}
 	}
 	_, err = git(p.Path, "worktree", "remove", "--", path)
+	if err == nil {
+		delete(m.state.WorktreeIssues, path)
+		err = m.save()
+	}
 	return err
 }
 func (m *Manager) RemoveProject(projectID string) error {

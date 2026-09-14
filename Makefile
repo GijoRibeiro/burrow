@@ -303,3 +303,7 @@ rebuild:
 	-@osascript -e 'tell application id "com.cloovies.workspace" to quit' >/dev/null 2>&1
 	@$(MAKE) --no-print-directory workspace-app
 	@open build/macos/Cloovies.app
+
+.PHONY: workspace-package
+workspace-package:
+	./scripts/package-workspace-app.sh

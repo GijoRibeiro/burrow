@@ -12,6 +12,10 @@ export function contextMenu(
   color: string,
 ): void {
   dismiss?.();
+  const anchor = document.elementFromPoint(x, y);
+  const scrollPositions = new Map<Element, [number, number]>();
+  for (let node = anchor; node; node = node.parentElement)
+    scrollPositions.set(node, [node.scrollLeft, node.scrollTop]);
   const menu = el("div", "context-menu");
   menu.setAttribute("role", "menu");
   menu.setAttribute("aria-label", `Actions for ${name}`);
@@ -88,7 +92,17 @@ export function contextMenu(
   document.addEventListener(
     "scroll",
     (event) => {
-      if (!menu.contains(event.target as Node)) close();
+      // Terminal output can scroll independently; only movement of the menu's
+      // source should dismiss its actions.
+      const target =
+        event.target === document ? document.scrollingElement : event.target;
+      if (!(target instanceof Element)) return;
+      const position = scrollPositions.get(target);
+      if (
+        position &&
+        (target.scrollLeft !== position[0] || target.scrollTop !== position[1])
+      )
+        close();
     },
     { capture: true, signal: listeners.signal },
   );
