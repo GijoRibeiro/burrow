@@ -67,6 +67,10 @@ Right-click a checkout to **Create child worktree…**, or right-click an agent 
 
 See [the teamwork guide](docs/COORDINATION.md) for the CLI, integration safeguards, and delivery behavior.
 
+For development app replacements while agents are running, follow the
+[macOS update procedure](docs/MACOS-UPDATES.md) to preserve sessions without
+creating repeated folder permission prompts.
+
 ## Persistence and boundaries
 
 - Project and terminal metadata: `~/.cloovies/workspace.json`, saved atomically.
