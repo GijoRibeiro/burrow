@@ -2294,6 +2294,231 @@ textarea {
 .setup-missing {
   color: var(--muted);
 }
-.agent-content .agent-empty { max-width: none; }
-.agent-launch-actions { align-items: stretch; }
-.sidebar-bottom > .subtle { background: transparent; color: var(--muted); padding: 8px; font-size: 12px; }
+.agent-content .agent-empty {
+  max-width: none;
+}
+.agent-launch-actions {
+  align-items: stretch;
+}
+.sidebar-bottom > .subtle {
+  background: transparent;
+  color: var(--muted);
+  padding: 8px;
+  font-size: 12px;
+}
+
+/* Teamwork stays in an optional panel; the terminal canvas remains independent. */
+.child-worktree {
+  border-inline-start: 1px solid var(--line);
+}
+.task-indicator {
+  flex: 0 0 auto;
+  padding: 3px 6px;
+  margin: 3px;
+  font-size: 10px;
+  color: var(--terminal-color);
+  background: transparent;
+}
+.task-indicator.waiting {
+  background: color-mix(in srgb, var(--terminal-color) 14%, transparent);
+}
+.field textarea {
+  min-height: 115px;
+  resize: vertical;
+  width: 100%;
+}
+.coordination-dialog {
+  width: min(1060px, 94vw);
+  max-width: 94vw;
+  height: min(800px, 90dvh);
+  padding: 22px;
+}
+.coordination-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.coordination-heading h2 {
+  flex: 1;
+  margin: 0;
+}
+.coordination-layout {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  gap: 20px;
+  height: calc(100% - 105px);
+  min-height: 0;
+}
+.task-list,
+.task-body {
+  min-height: 0;
+  overflow: auto;
+}
+.task-list {
+  border-right: 1px solid var(--line);
+  padding-right: 12px;
+}
+.task-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 12px;
+  text-align: left;
+  background: transparent;
+  margin-bottom: 6px;
+}
+.task-card.selected {
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  border-color: var(--ink);
+}
+.task-card small,
+.task-state {
+  color: var(--muted);
+  font-size: 12px;
+}
+.task-state.waiting {
+  color: var(--ink);
+}
+.task-description,
+.coordination-message p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.task-actions button {
+  font-size: 12px;
+  padding: 7px 9px;
+}
+.task-messages {
+  margin: 16px 0;
+  max-height: 260px;
+  overflow: auto;
+}
+.coordination-message {
+  padding: 12px;
+  margin-bottom: 8px;
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+}
+.coordination-message small {
+  color: var(--muted);
+}
+.coordination-message p {
+  margin: 8px 0 0;
+}
+.task-composer {
+  display: grid;
+  gap: 8px;
+}
+.task-composer textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+.task-composer button {
+  justify-self: end;
+}
+.coordination-instructions {
+  margin-top: 16px;
+  font-size: 12px;
+}
+.coordination-instructions pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.task-review {
+  width: min(1000px, 94vw);
+  max-width: 94vw;
+}
+.task-diff {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 55dvh;
+  overflow: auto;
+  font-family: "Google Sans Code", monospace;
+  font-size: 12px;
+  user-select: text;
+}
+@media (max-width: 650px) {
+  .coordination-layout {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+  .task-list {
+    max-height: 180px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .coordination-dialog {
+    overflow: auto;
+  }
+}
+
+.coordination-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+.coordination-layout {
+  flex: 1;
+  height: auto;
+}
+.task-body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.task-detail {
+  flex: 0 0 auto;
+  max-height: 180px;
+  overflow: auto;
+}
+.task-description {
+  margin: 8px 0;
+}
+.task-messages {
+  flex: 1;
+  min-height: 60px;
+  max-height: none;
+}
+.task-composer {
+  flex: 0 0 auto;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.task-composer textarea {
+  grid-column: 1 / -1;
+  min-height: 65px;
+  height: 65px;
+  grid-row: 1;
+}
+.task-composer select {
+  min-width: 0;
+}
+.coordination-instructions {
+  flex: 0 0 auto;
+  max-height: 180px;
+  overflow: auto;
+  margin-top: 10px;
+}
+.coordination-message {
+  background: color-mix(
+    in srgb,
+    var(--message-color, var(--ink)) 7%,
+    transparent
+  );
+}
+@media (max-width: 650px) {
+  .coordination-layout {
+    flex: none;
+  }
+  .task-body {
+    overflow: visible;
+  }
+  .task-messages {
+    max-height: 250px;
+    flex: none;
+  }
+}

@@ -33,3 +33,10 @@ This implementation targets macOS and Unix systems with tmux and PTY support. Th
 `appearance.ts` allocates distinct colors and least-used randomized creatures, persisted per terminal. A versioned migration repairs inherited duplicate identities. `motion.ts` animates layout changes using saved pane rectangles and short-lived inert exit snapshots; live PTYs are never replaced for animation. Reduced-motion bypasses these effects. Native menu commands and capture-phase browser shortcuts share the same application actions. Text size updates both xterm and Agent reading content.
 
 Agent view previews local PNG, JPEG, GIF, and WebP references beneath conversation messages and agent screen output. Clicking a thumbnail opens a modal with Fit and Actual size views. Images are read through a terminal-scoped endpoint confined to that checkout; traversal and symlinks outside it are rejected, along with non-image files and files over 24 MiB. Missing references leave the original text intact without broken thumbnails.
+
+
+## Optional coordination
+
+`coordination.go` stores tasks, explicit completion commits, inbox messages, and worktree lineage in the workspace state. Ordinary worktrees have no parent metadata. Only new child creation records lineage; the discovered Git checkout list remains authoritative. `agent_runtime.go` exposes local UI routes and an authenticated agent endpoint. `internal/agentcli` implements the JSON CLI, including separate read/ack operations and bounded waiting. The standalone server writes a private runtime descriptor and stable launcher; managed agents get an identity and CLI PATH without changing their normal initial prompt unless they are delegated workers.
+
+Review records both the completed child commit and current parent commit. Integration refuses a changed parent commit/branch, dirty checkout, or existing Git operation. Merge conflicts are aborted. Task status and process status are separate: task cancellation is metadata, and terminal termination remains an explicit action. See [COORDINATION.md](COORDINATION.md) for the user workflow and limitations.

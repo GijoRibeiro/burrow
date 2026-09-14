@@ -1,3 +1,4 @@
+import { worktreeHierarchy } from "./hierarchy";
 import { contextMenu } from "./context-menu";
 import { creature } from "./creature";
 import { badge, button, dialog, el } from "./dom";
@@ -14,7 +15,9 @@ export interface SidebarContext {
   renderSidebar(): void;
   creatureName(id: string): string;
   terminalColor(id: string): string;
-  newWorktree(p: Project): void;
+  newWorktree(p: Project, parentPath?: string): void;
+  delegate(id: string): void;
+  coordination(taskId?: string): void;
   removeProject(p: Project): void;
   newTerminal(project: string, path: string): void;
   removeWorktree(p: Project, path: string, name: string): void;
@@ -132,11 +135,13 @@ export function renderProjectList(ctx: SidebarContext): void {
         content.append(
           el("p", "project-error", "Folder unavailable. Check its location."),
         );
-      for (const w of p.worktrees) {
+      for (const { tree: w, depth } of worktreeHierarchy(p.worktrees)) {
         const row = el(
           "div",
           `worktree-row${ctx.selectedPath === w.path ? " selected" : ""}`,
         );
+        row.style.marginInlineStart = `${Math.min(depth, 8) * 14}px`;
+        row.classList.toggle("child-worktree", !!w.parentPath);
         const selectTree = button(
           `Select ${p.name} ${w.branch || w.name}`,
           () => {
@@ -145,7 +150,9 @@ export function renderProjectList(ctx: SidebarContext): void {
           "worktree-label",
           "",
         );
-        selectTree.title = w.path;
+        selectTree.title = w.parentPath
+          ? `Child of ${w.parentPath}\n${w.path}`
+          : w.path;
         selectTree.append(
           el("span", "worktree-icon", w.main ? "⌂" : "⑂"),
           el(
@@ -167,6 +174,10 @@ export function renderProjectList(ctx: SidebarContext): void {
             x,
             y,
             [
+              {
+                label: "Create child worktree…",
+                run: () => ctx.newWorktree(p, w.path),
+              },
               {
                 label: "New terminal…",
                 run: () => ctx.newTerminal(p.id, w.path),
@@ -236,8 +247,11 @@ export function renderProjectList(ctx: SidebarContext): void {
           row.append(link);
         }
         content.append(row);
-        for (const t of terminals.filter((t) => t.path === w.path))
-          content.append(sessionRow(ctx, t, visible));
+        for (const t of terminals.filter((t) => t.path === w.path)) {
+          const session = sessionRow(ctx, t, visible);
+          session.style.marginInlineStart = `${Math.min(depth, 8) * 14}px`;
+          content.append(session);
+        }
       }
       for (const t of terminals.filter(
         (t) => !p.worktrees.some((w) => w.path === t.path),
@@ -289,6 +303,16 @@ function sessionRow(
           : t.status,
     ),
   );
+  const task = ctx.state.tasks?.find((task) => task.id === t.taskId);
+  if (task) {
+    const status = button(
+      `Open task ${task.title}`,
+      () => ctx.coordination(task.id),
+      `task-indicator ${task.status}`,
+      task.integratedCommit ? "integrated" : task.status,
+    );
+    row.append(status);
+  }
   const remove = () =>
     dialog(
       "Remove terminal?",
@@ -313,6 +337,13 @@ function sessionRow(
       },
       { label: "Rename terminal…", run: () => ctx.renameTerminal(t.id) },
     ];
+    if (t.program === "claude" || t.program === "codex") {
+      actions.push({ label: "Delegate task…", run: () => ctx.delegate(t.id) });
+      actions.push({
+        label: "Tasks and inbox…",
+        run: () => ctx.coordination(t.taskId),
+      });
+    }
     if (t.status !== "running")
       actions.push({
         label: "Start terminal",
@@ -357,7 +388,7 @@ function sessionRow(
       open(bounds.left + 12, bounds.bottom);
     }
   });
-  row.append(toggle);
+  row.prepend(toggle);
   if (t.status === "stopped")
     row.append(
       button(`Remove terminal ${t.name}`, remove, "icon-button subtle", "×"),

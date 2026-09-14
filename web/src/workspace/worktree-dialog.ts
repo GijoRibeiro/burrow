@@ -23,7 +23,9 @@ export function worktreeDialog(
     name: string;
     base: string;
     issueID?: string;
+    parentPath?: string;
   }) => Promise<void>,
+  parentPath?: string,
 ): void {
   const d = el("dialog", "dialog worktree-dialog");
   const form = el("form");
@@ -71,6 +73,7 @@ export function worktreeDialog(
   const base = el("input");
   base.name = "base";
   base.value = "HEAD";
+  base.disabled = !!parentPath;
   base.required = true;
   base.setAttribute("aria-label", "Start from");
   for (const input of [name, base, search]) {
@@ -247,11 +250,13 @@ export function worktreeDialog(
     }
   };
   form.append(
-    el("h2", "", "Create a worktree"),
+    el("h2", "", parentPath ? "Create a child worktree" : "Create a worktree"),
     el(
       "p",
       "dialog-description",
-      `A separate checkout inside ${project.path}/.worktrees, with its own branch.`,
+      parentPath
+        ? `Branches from the latest commit in ${parentPath}. Uncommitted changes stay in the parent. This creates an independent checkout; no agent is started.`
+        : `A separate checkout inside ${project.path}/.worktrees, with its own branch.`,
     ),
     mode,
     linearPanel,
@@ -278,6 +283,7 @@ export function worktreeDialog(
       await create({
         name: name.value.trim(),
         base: base.value.trim(),
+        ...(parentPath ? { parentPath } : {}),
         ...(fromLinear ? { issueID: selected!.id } : {}),
       });
       d.close();

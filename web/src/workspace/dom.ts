@@ -25,6 +25,7 @@ export function badge(text: string, className = ""): HTMLElement {
   return el("span", `badge ${className}`, text);
 }
 export interface Field {
+  multiline?: boolean;
   name: string;
   label: string;
   value?: string;
@@ -48,7 +49,11 @@ export function dialog(
   for (const field of fields) {
     const label = el("label", "field");
     label.append(el("span", "", field.label));
-    const input = field.options ? el("select") : el("input");
+    const input = field.options
+      ? el("select")
+      : field.multiline
+        ? el("textarea")
+        : el("input");
     input.name = field.name;
     input.setAttribute("aria-label", field.label);
     if (input instanceof HTMLSelectElement) {

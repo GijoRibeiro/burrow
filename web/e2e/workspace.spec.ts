@@ -1526,3 +1526,189 @@ test("launch buttons share a row and wrap only in narrow panes", async ({
   await page.setViewportSize({ width: 400, height: 900 });
   await expect.poll(async () => new Set(await y()).size).toBeGreaterThan(1);
 });
+
+test("optional child worktrees and agent coordination preserve the terminal canvas", async ({
+  page,
+  request,
+}, info) => {
+  const root = process.env.CLOOVIES_E2E_ROOT!,
+    path = join(root, "Teamwork");
+  mkdirSync(path);
+  for (const args of [
+    ["init", "-b", "main", path],
+    ["-C", path, "config", "user.name", "Test"],
+    ["-C", path, "config", "user.email", "test@localhost"],
+    ["-C", path, "commit", "--allow-empty", "-m", "Initial"],
+  ])
+    execFileSync("git", args);
+  const project = await (
+    await request.post("/api/workspace/projects", {
+      data: { path, name: "Teamwork" },
+    })
+  ).json();
+  const parent = await (
+    await request.post("/api/workspace/terminals", {
+      data: {
+        projectId: project.id,
+        path,
+        name: "Lead agent",
+        program: "claude",
+      },
+    })
+  ).json();
+  await page.goto("/");
+  const group = page
+    .locator(".project-group")
+    .filter({
+      has: page.getByRole("button", { name: "Toggle Teamwork", exact: true }),
+    });
+  await group
+    .getByRole("button", { name: "Select Teamwork main", exact: true })
+    .click({ button: "right" });
+  await page
+    .getByRole("menuitem", { name: "Create child worktree…", exact: true })
+    .click();
+  let form = page.getByRole("dialog");
+  await expect(form).toContainText("Uncommitted changes stay in the parent");
+  await expect(form.getByLabel("Start from", { exact: true })).toBeDisabled();
+  await form.getByLabel("Worktree and branch name").fill("manual-child");
+  await form
+    .getByRole("button", { name: "Create worktree", exact: true })
+    .click();
+  await expect(
+    group.locator(".child-worktree").filter({ hasText: "manual-child" }),
+  ).toHaveCount(1);
+  let snapshot = await (await request.get("/api/workspace")).json();
+  expect(
+    snapshot.terminals.filter(
+      (t: { projectId: string }) => t.projectId === project.id,
+    ),
+  ).toHaveLength(1);
+  await group
+    .getByRole("button", { name: "Show Lead agent", exact: true })
+    .click();
+  await group
+    .getByRole("button", { name: "Hide Lead agent", exact: true })
+    .click({ button: "right" });
+  await page
+    .getByRole("menuitem", { name: "Delegate task…", exact: true })
+    .click();
+  form = page.getByRole("dialog");
+  await form.getByLabel("Child worktree / branch").fill("api-worker");
+  await form
+    .getByLabel("Task title", { exact: true })
+    .fill("Implement endpoint");
+  await form
+    .getByLabel("Task instructions", { exact: true })
+    .fill("Implement and test an endpoint, then commit the result.");
+  await form
+    .getByRole("button", { name: "Delegate task", exact: true })
+    .click();
+  await expect(form).toHaveCount(0);
+  await expect(
+    page.getByRole("region", { name: "Lead agent terminal", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("region", {
+      name: "Implement endpoint terminal",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Tasks and inbox", exact: true })
+    .click();
+  const panel = page.getByRole("dialog", {
+    name: "Tasks and inbox",
+    exact: true,
+  });
+  await panel
+    .getByRole("button", { name: "Open task Implement endpoint", exact: true })
+    .click();
+  await expect(panel.locator(".task-messages")).toContainText(
+    "Fixture question: which endpoint",
+  );
+  await expect(panel.locator(".task-detail")).toContainText("needs an answer");
+  const coordination = await (
+    await request.get("/api/workspace/coordination")
+  ).json();
+  const task = coordination.tasks.find(
+    (t: { parentId: string }) => t.parentId === parent.id,
+  );
+  expect(task).toBeTruthy();
+  const cli = join(root, "state", "bin", "burrow");
+  const run = (agent: string, ...args: string[]) =>
+    JSON.parse(
+      execFileSync(cli, ["--agent", agent, ...args], { encoding: "utf8" }),
+    );
+  const inbox = run(parent.id, "inbox");
+  expect(
+    inbox.some((m: { text: string }) => m.text.includes("Fixture question")),
+  ).toBe(true);
+  for (const msg of inbox) run(parent.id, "ack", msg.id);
+  expect(run(parent.id, "inbox")).toEqual([]);
+  await panel
+    .getByLabel("Coordination message", { exact: true })
+    .fill("Implement /health and test the response.");
+  await panel
+    .getByRole("button", { name: "Send to inbox", exact: true })
+    .click();
+  const reply = run(task.agentId, "inbox");
+  expect(reply[0].text).toBe("Implement /health and test the response.");
+  run(task.agentId, "ack", reply[0].id);
+  // Real committed changes exercise review/integration without any model calls.
+  writeFileSync(join(task.path, "health.txt"), "healthy\n");
+  for (const args of [
+    ["add", "health.txt"],
+    ["commit", "-m", "Add health endpoint"],
+  ])
+    execFileSync("git", ["-C", task.path, ...args]);
+  run(
+    task.agentId,
+    "status",
+    "done",
+    "Implemented /health; fixture checks passed.",
+  );
+  await expect(panel.locator(".task-detail")).toContainText(
+    "fixture checks passed",
+  );
+  await page.screenshot({
+    path: info.outputPath("teamwork-inbox.png"),
+    animations: "disabled",
+  });
+  await panel
+    .getByRole("button", { name: "Review changes", exact: true })
+    .click();
+  const review = page.getByRole("dialog", {
+    name: "Review task changes",
+    exact: true,
+  });
+  await expect(review).toContainText("health.txt");
+  await review
+    .getByRole("button", { name: "Integrate into parent", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Integrate changes", exact: true })
+    .click();
+  await expect(review).toHaveCount(0);
+  await expect(panel.locator(".task-detail")).toContainText("Integrated at");
+  expect(existsSync(join(path, "health.txt"))).toBe(true);
+  await panel
+    .getByRole("button", { name: "Close tasks and inbox", exact: true })
+    .click();
+  await page.reload();
+  await expect(
+    page.getByRole("region", { name: "Lead agent terminal", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("region", {
+      name: "Implement endpoint terminal",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(group.locator(".child-worktree")).toHaveCount(2);
+  snapshot = await (await request.get("/api/workspace")).json();
+  expect(
+    snapshot.tasks.find((t: { id: string }) => t.id === task.id)
+      .integratedCommit,
+  ).toBeTruthy();
+});
