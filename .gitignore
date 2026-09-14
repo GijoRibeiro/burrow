@@ -3,6 +3,7 @@
 .claude/
 .firecrawl/
 node_modules/
+__pycache__/
 bin/
 build/
 third_party/
