@@ -173,6 +173,18 @@ export function renderProjectList(ctx: SidebarContext): void {
               "×",
             ),
           );
+        if (w.issue) {
+          const link = el("a", "worktree-issue", w.issue.identifier);
+          link.href = w.issue.url;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          link.title = w.issue.title;
+          link.setAttribute(
+            "aria-label",
+            `Open ${w.issue.identifier} in Linear`,
+          );
+          row.append(link);
+        }
         content.append(row);
         for (const t of terminals.filter((t) => t.path === w.path))
           content.append(sessionRow(ctx, t, visible));

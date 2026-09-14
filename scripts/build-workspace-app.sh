@@ -9,9 +9,16 @@ trap 'rm -rf "$stage"' EXIT
 bundle="$stage/Cloovies.app"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources/FontLicenses"
 cp web/public/font-licenses/*.txt "$bundle/Contents/Resources/FontLicenses/"
-cp bin/cloovies-workspace "$bundle/Contents/MacOS/cloovies-workspace"
+mkdir -p "$bundle/Contents/Resources/Setup"
+cp app/setup/install.command "$bundle/Contents/Resources/Setup/"
 iconutil -c icns build/macos/icon.iconset -o "$bundle/Contents/Resources/AppIcon.icns"
-swiftc app/workspace.swift -o "$bundle/Contents/MacOS/Cloovies" -framework Cocoa -framework WebKit -target arm64-apple-macos13.0
+for architecture in arm64 x86_64; do
+  case "$architecture" in arm64) go_arch=arm64 ;; x86_64) go_arch=amd64 ;; esac
+  GOOS=darwin GOARCH="$go_arch" go build -buildvcs=false -o "$stage/server-$architecture" ./cmd/workspace
+  swiftc app/workspace.swift -o "$stage/app-$architecture" -framework Cocoa -framework WebKit -target "$architecture-apple-macos13.0"
+done
+lipo -create "$stage/server-arm64" "$stage/server-x86_64" -output "$bundle/Contents/MacOS/cloovies-workspace"
+lipo -create "$stage/app-arm64" "$stage/app-x86_64" -output "$bundle/Contents/MacOS/Cloovies"
 cat > "$bundle/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -20,8 +27,8 @@ cat > "$bundle/Contents/Info.plist" <<'PLIST'
 <key>CFBundleName</key><string>Cloovies</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundleIdentifier</key><string>com.cloovies.workspace</string>
-<key>CFBundleVersion</key><string>1</string>
-<key>CFBundleShortVersionString</key><string>1.0.0</string>
+<key>CFBundleVersion</key><string>2</string>
+<key>CFBundleShortVersionString</key><string>0.2.0</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>NSHighResolutionCapable</key><true/>
 <key>LSMinimumSystemVersion</key><string>13.0</string>

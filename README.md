@@ -8,6 +8,12 @@ The workspace pairs DM Sans for the UI with Google Sans Code for terminals and c
 
 The repository uses **Burrow** as a working name. The current app bundle and compatibility identifiers still use Cloovies.
 
+## Download and setup
+
+Download the app from [Releases](https://github.com/GijoRibeiro/burrow/releases). It runs on Apple Silicon and Intel Macs with macOS 13 or newer. First-run setup offers installation of Git and tmux, plus optional Claude Code and Codex. Each person signs in with their own accounts. See [installation and sharing instructions](docs/INSTALL.md), including the first-open step for this unnotarized build.
+
+To produce the shareable ZIP yourself, run `make workspace-package`. The archive contains the app and setup instructions, without personal workspace data.
+
 ## Run
 
 On macOS, open `build/macos/Cloovies.app` after building with:
@@ -16,7 +22,7 @@ On macOS, open `build/macos/Cloovies.app` after building with:
 make workspace-app
 ```
 
-This produces a standalone Apple Silicon app with its server and web assets embedded. It needs Git and tmux at runtime; Claude, Codex, and other agent CLIs are optional. Build requirements: Go 1.26.1+, Node 20.19+ (or 22.12+), npm, and Xcode Command Line Tools.
+This produces a standalone universal macOS app with its server and web assets embedded. It needs Git and tmux at runtime; Claude, Codex, and other agent CLIs are optional. Build requirements: Go 1.26.1+, Node 20.19+ (or 22.12+), npm, and Xcode Command Line Tools.
 
 For the browser:
 
@@ -39,7 +45,7 @@ CLOOVIES_BACKEND_URL=http://127.0.0.1:4340 npm run dev
 ## Working in the workspace
 
 1. **Add project**: choose a Git repository with the native folder picker, or enter its path. Existing worktrees are discovered automatically, including worktrees created outside Cloovies. Adding a linked worktree resolves to its parent project.
-2. **Create worktree**: use the project's branch-plus button. Give it a name and a starting branch or commit. New worktrees live in `<project>/.worktrees/<name>` on a branch with the same name. The folder is excluded through Git's local `info/exclude`; the committed `.gitignore` is unchanged.
+2. **Create worktree**: use the project's **+** button. Choose Manual or **From Linear** to search your tickets, select one, and prefill an editable branch name. Linear links remain with the worktree; new agent drafts include the ticket context. For manual creation, give it a name and a starting branch or commit. New worktrees live in `<project>/.worktrees/<name>` on a branch with the same name. The folder is excluded through Git's local `info/exclude`; the committed `.gitignore` is unchanged.
 3. **New terminal**: choose any project/worktree and a session name. Choose **Claude Code** (the default), **Codex**, or **Shell**. Both agents start in YOLO mode, including after restart. Codex opens its native CLI in Terminal view.
 4. **Choose terminals**: show or hide sessions from across all projects. Project selection does not replace the visible canvas. Use a pane's split buttons to add another terminal to its right or below.
 5. Drag dividers to resize. Double-click a divider to balance it. Drag one header onto another to swap panes. Columns, rows, and grid presets arrange all visible terminals. Focus mode temporarily enlarges one pane.
@@ -65,6 +71,8 @@ macOS shortcuts: Cmd+K opens the terminal picker, Cmd+Shift+N creates a terminal
 - The native app uses port 4340. Its log is `~/Library/Logs/Cloovies/workspace.log`. `CLOOVIES_NATIVE_PORT` can select a different native port.
 - Tests use separate folders and tmux sockets. For another isolated instance, set both `CLOOVIES_WORKSPACE_DIR` and `CLOOVIES_TMUX_SOCKET`.
 
+See the [Orca comparison and naming ideas](docs/ORCA-COMPARISON.md) for current feature gaps.
+
 ## Code and verification
 
 The new implementation lives in `internal/workspace`, `web/src/workspace`, `cmd/workspace`, and `app/workspace.swift`. See [docs/WORKSPACE.md](docs/WORKSPACE.md) for the data model and transport details.
@@ -72,6 +80,7 @@ The new implementation lives in `internal/workspace`, `web/src/workspace`, `cmd/
 ```sh
 go test ./...
 go test -race ./internal/workspace
+python3 scripts/test-workspace-installer.py
 cd web
 npm ci
 npm run build

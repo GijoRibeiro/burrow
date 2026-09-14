@@ -205,6 +205,7 @@ export class AgentView {
           "Start Claude or Codex in YOLO mode, or use Terminal for shell commands.",
         ),
       );
+      const launchActions = el("div", "agent-launch-actions");
       for (const [program, label] of [
         ["claude", "Claude"],
         ["codex", "Codex"],
@@ -239,9 +240,9 @@ export class AgentView {
         );
         launch.append(icon, caption);
         launch.disabled = !live || !a || this.launching;
-        empty.append(launch);
+        launchActions.append(launch);
       }
-      empty.append(
+      launchActions.append(
         button(
           "Use shell terminal",
           this.openTerminal,
@@ -249,6 +250,7 @@ export class AgentView {
           ">_ Use terminal",
         ),
       );
+      empty.append(launchActions);
       nodes.push(empty);
     }
     if (!conversation && (a?.kind === "claude" || a?.kind === "codex")) {

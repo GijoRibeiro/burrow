@@ -1,3 +1,5 @@
+import { nativeHandler, setupDialog } from "./setup";
+import { worktreeDialog, issuePrompt } from "./worktree-dialog";
 import "./workspace.css";
 import { captureLayout } from "./motion";
 import { nextColor, nextCreature } from "./appearance";
@@ -88,6 +90,7 @@ class WorkspaceApp {
       ),
       legacy,
     );
+    sideBottom.append(button("Setup and tools", setupDialog, "subtle"));
     this.sidebar.append(
       brand,
       sideHeading,
@@ -148,6 +151,44 @@ class WorkspaceApp {
       ),
     );
     toolbar.append(title, tools);
+    const drag = nativeHandler("windowDrag");
+    if (drag) {
+      let scheduled = false,
+        previous = "";
+      const update = () => {
+        if (scheduled) return;
+        scheduled = true;
+        requestAnimationFrame(() => {
+          scheduled = false;
+          const rect = (node: Element) => {
+            const { x, y, width, height } = node.getBoundingClientRect();
+            return { x, y, width, height };
+          };
+          const payload = {
+            regions: document.querySelector("dialog[open]")
+              ? []
+              : [toolbar, brand].map(rect),
+            controls: [
+              ...toolbar.querySelectorAll("button, input, a, select"),
+            ].map(rect),
+          };
+          const signature = JSON.stringify(payload);
+          if (signature !== previous) {
+            previous = signature;
+            void drag.postMessage(payload).catch(() => {});
+          }
+        });
+      };
+      const observer = new ResizeObserver(update);
+      for (const region of [toolbar, brand, tools]) observer.observe(region);
+      new MutationObserver(update).observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["open"],
+      });
+      update();
+    }
     this.alert.setAttribute("role", "alert");
     this.alert.hidden = true;
     const bottom = el("footer", "workspace-footer");
@@ -229,6 +270,12 @@ class WorkspaceApp {
           /* An invalid layout leaves an empty canvas, never loses sessions. */
         }
         this.initialized = true;
+        if (
+          nativeHandler("installTools") &&
+          !state.projects.length &&
+          localStorage.getItem("cloovies.workspace.onboarded.v1") !== "yes"
+        )
+          setupDialog();
         this.ensureAppearances();
         this.persist();
       }
@@ -406,7 +453,13 @@ class WorkspaceApp {
                 name: `${program === "claude" ? "Claude" : "Codex"} · ${t.name}`,
                 program,
               });
-              this.drafts[next.id] = this.drafts[t.id] || "";
+              this.drafts[next.id] =
+                this.drafts[t.id] ||
+                (project.worktrees.find((w) => w.path === t.path)?.issue
+                  ? issuePrompt(
+                      project.worktrees.find((w) => w.path === t.path)!.issue!,
+                    )
+                  : "");
               delete this.drafts[t.id];
               this.tree = insert(this.tree, next.id, t.id, "row");
               this.tree = remove(this.tree, t.id);
@@ -595,23 +648,11 @@ class WorkspaceApp {
     );
   }
   private newWorktree(p: Project): void {
-    dialog(
-      "Create a worktree",
-      `A separate checkout inside ${p.path}/.worktrees, with its own branch.`,
-      [
-        {
-          name: "name",
-          label: "Worktree and branch name",
-          placeholder: "redesign",
-        },
-        { name: "base", label: "Start from", value: "HEAD" },
-      ],
-      "Create worktree",
-      async (values) => {
-        await this.mutate(`/projects/${p.id}/worktrees`, "POST", values);
-      },
-    );
+    worktreeDialog(p, async (values) => {
+      await this.mutate(`/projects/${p.id}/worktrees`, "POST", values);
+    });
   }
+
   private newTerminal(
     projectId = this.selectedProject,
     path = this.selectedPath,
@@ -671,6 +712,11 @@ class WorkspaceApp {
           name: values.name,
           program: values.program,
         });
+        const issue = this.state.projects
+          .find((p) => p.id === projectId)
+          ?.worktrees.find((w) => w.path === path)?.issue;
+        if (issue && values.program !== "shell")
+          this.drafts[t.id] = issuePrompt(issue);
         this.appearances[t.id].view =
           values.program === "claude" ? "agent" : "terminal";
         this.show(t.id, target, axis);
