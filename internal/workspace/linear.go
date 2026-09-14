@@ -86,7 +86,7 @@ func (m *Manager) linearRoutes(mux *http.ServeMux) {
 	})
 }
 
-func (m *Manager) CreateLinkedWorktree(projectID, name, base, issueID string) (Worktree, error) {
+func (m *Manager) CreateLinkedWorktree(projectID, name, base, issueID string, parent ...string) (Worktree, error) {
 	var issue *linear.WorktreeIssue
 	if issueID != "" {
 		key, err := m.linearKey()
@@ -102,5 +102,5 @@ func (m *Manager) CreateLinkedWorktree(projectID, name, base, issueID string) (W
 		}
 		issue = &linked
 	}
-	return m.createWorktree(projectID, name, base, issue)
+	return m.createWorktree(projectID, name, base, issue, parent...)
 }

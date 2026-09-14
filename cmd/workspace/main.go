@@ -15,11 +15,19 @@ import (
 	"time"
 
 	cloovies "github.com/gijo/cloovies"
+	"github.com/gijo/cloovies/internal/agentcli"
 	"github.com/gijo/cloovies/internal/env"
 	"github.com/gijo/cloovies/internal/workspace"
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "agent" {
+		if err := agentcli.Run(os.Args[2:], os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	port := flag.Int("port", 3333, "Local HTTP port")
 	web := flag.String("web", "", "Built web directory (defaults to embedded assets)")
 	flag.Parse()
@@ -27,6 +35,9 @@ func main() {
 	env.AugmentPATH(home)
 	m, err := workspace.NewDefault()
 	if err != nil {
+		log.Fatal(err)
+	}
+	if err := m.ConfigureAgentRuntime(fmt.Sprintf("http://127.0.0.1:%d", *port)); err != nil {
 		log.Fatal(err)
 	}
 	mux := http.NewServeMux()

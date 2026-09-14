@@ -33,6 +33,10 @@ func (m *Manager) start(t Terminal) error {
 	}
 	name := sessionName(t.ID)
 	args := []string{"new-session", "-d", "-s", name, "-c", t.Path, "-x", "100", "-y", "30"}
+	if m.cliPath != "" && (t.Program == "claude" || t.Program == "codex") {
+		// Set these on the executed process too: tmux can supply its own PATH.
+		args = append(args, "-e", "BURROW_AGENT_ID="+t.ID, "/usr/bin/env", "BURROW_AGENT_ID="+t.ID, "BURROW_CLI="+m.cliPath, "PATH="+filepath.Dir(m.cliPath)+":"+os.Getenv("PATH"))
+	}
 	if t.Program == "claude" {
 		binary, err := exec.LookPath("claude")
 		if err != nil {
@@ -49,6 +53,11 @@ func (m *Manager) start(t Terminal) error {
 		args = append(args, binary, "--dangerously-bypass-approvals-and-sandbox")
 	} else {
 		args = append(args, shell)
+	}
+	if t.TaskID != "" && (t.Program == "claude" || t.Program == "codex") {
+		if task, err := m.task(t.TaskID); err == nil {
+			args = append(args, m.taskPrompt(task))
+		}
 	}
 	if _, err := m.tmux(args...); err != nil {
 		return err
@@ -99,7 +108,14 @@ func (m *Manager) CreateProgramTerminal(projectID, path, name, program string) (
 		name = "Terminal"
 	}
 	t := Terminal{Program: program, ID: id(), ProjectID: projectID, Path: path, Name: name, CreatedAt: time.Now().UTC(), Status: "running"}
+	if isAgent(t) {
+		if m.state.AgentTokens == nil {
+			m.state.AgentTokens = map[string]string{}
+		}
+		m.state.AgentTokens[t.ID] = id() + id()
+	}
 	if err = m.start(t); err != nil {
+		delete(m.state.AgentTokens, t.ID)
 		return Terminal{}, err
 	}
 	m.state.Terminals = append(m.state.Terminals, t)

@@ -14,3 +14,14 @@ process.stdin.on('data', data => {
     process.stdout.write(`Codex received: ${text}\r\n`);
   }
 });
+// A delegated fixture exercises the actual workspace CLI from inside tmux.
+if (process.argv.some(arg => arg.startsWith('You are working in an isolated child worktree'))) {
+  const { execFileSync } = require('node:child_process');
+  try {
+    execFileSync('burrow', ['send', 'parent', 'Fixture question: which endpoint should I implement?']);
+    execFileSync('burrow', ['status', 'waiting', 'Waiting for endpoint details']);
+    process.stdout.write('Coordination fixture connected\r\n');
+  } catch (error) {
+    process.stdout.write(`Coordination fixture failed: ${error.message}\r\n`);
+  }
+}

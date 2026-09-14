@@ -27,13 +27,16 @@ type Project struct {
 	Error     string     `json:"error,omitempty"`
 }
 type Worktree struct {
-	Issue  *linear.WorktreeIssue `json:"issue,omitempty"`
-	Path   string                `json:"path"`
-	Name   string                `json:"name"`
-	Branch string                `json:"branch"`
-	Main   bool                  `json:"main"`
+	ParentPath string                `json:"parentPath,omitempty"`
+	BaseCommit string                `json:"baseCommit,omitempty"`
+	Issue      *linear.WorktreeIssue `json:"issue,omitempty"`
+	Path       string                `json:"path"`
+	Name       string                `json:"name"`
+	Branch     string                `json:"branch"`
+	Main       bool                  `json:"main"`
 }
 type Terminal struct {
+	TaskID    string    `json:"taskId,omitempty"`
 	Program   string    `json:"program,omitempty"`
 	ID        string    `json:"id"`
 	ProjectID string    `json:"projectId"`
@@ -43,6 +46,10 @@ type Terminal struct {
 	Status    string    `json:"status"`
 }
 type State struct {
+	WorktreeLinks  map[string]WorktreeLink         `json:"worktreeLinks,omitempty"`
+	Tasks          []Task                          `json:"tasks,omitempty"`
+	Messages       []AgentMessage                  `json:"messages,omitempty"`
+	AgentTokens    map[string]string               `json:"agentTokens,omitempty"`
 	WorktreeIssues map[string]linear.WorktreeIssue `json:"worktreeIssues,omitempty"`
 	Version        int                             `json:"version"`
 	Projects       []Project                       `json:"projects"`
@@ -50,10 +57,12 @@ type State struct {
 	TmuxAvailable  bool                            `json:"tmuxAvailable"`
 }
 type Manager struct {
-	mu     sync.Mutex
-	file   string
-	socket string
-	state  State
+	runtimeURL string
+	cliPath    string
+	mu         sync.Mutex
+	file       string
+	socket     string
+	state      State
 }
 
 func New(file, socket string) (*Manager, error) {
@@ -177,6 +186,13 @@ func (m *Manager) project(id string) (Project, error) {
 func (m *Manager) Snapshot() State {
 	m.mu.Lock()
 	s := m.state
+	s.AgentTokens = nil
+	s.Messages = nil
+	s.Tasks = append([]Task(nil), m.state.Tasks...)
+	s.WorktreeLinks = make(map[string]WorktreeLink, len(m.state.WorktreeLinks))
+	for path, link := range m.state.WorktreeLinks {
+		s.WorktreeLinks[path] = link
+	}
 	s.Projects = append([]Project{}, s.Projects...)
 	s.Terminals = append([]Terminal{}, s.Terminals...)
 	s.WorktreeIssues = make(map[string]linear.WorktreeIssue, len(m.state.WorktreeIssues))
@@ -210,6 +226,9 @@ func (m *Manager) Snapshot() State {
 		p := &s.Projects[i]
 		p.Worktrees, err = listWorktrees(p.Path)
 		for j := range p.Worktrees {
+			link := s.WorktreeLinks[p.Worktrees[j].Path]
+			p.Worktrees[j].ParentPath = link.ParentPath
+			p.Worktrees[j].BaseCommit = link.BaseCommit
 			if issue, ok := s.WorktreeIssues[p.Worktrees[j].Path]; ok {
 				copy := issue
 				p.Worktrees[j].Issue = &copy
@@ -292,9 +311,16 @@ func listWorktrees(root string) ([]Worktree, error) {
 func (m *Manager) CreateWorktree(projectID, name, base string) (Worktree, error) {
 	return m.createWorktree(projectID, name, base, nil)
 }
-func (m *Manager) createWorktree(projectID, name, base string, issue *linear.WorktreeIssue) (Worktree, error) {
+func (m *Manager) createWorktree(projectID, name, base string, issue *linear.WorktreeIssue, parent ...string) (Worktree, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	parentPath := ""
+	if len(parent) > 0 {
+		parentPath = parent[0]
+	}
+	return m.createWorktreeLocked(projectID, name, base, issue, parentPath)
+}
+func (m *Manager) createWorktreeLocked(projectID, name, base string, issue *linear.WorktreeIssue, parentPath string) (Worktree, error) {
 	p, err := m.project(projectID)
 	if err != nil {
 		return Worktree{}, err
@@ -309,8 +335,31 @@ func (m *Manager) createWorktree(projectID, name, base string, issue *linear.Wor
 	if base = strings.TrimSpace(base); base == "" {
 		base = "HEAD"
 	}
+	// A child starts at its parent's committed HEAD, independently of the root checkout.
+	resolvePath := p.Path
+	if parentPath != "" {
+		parentPath, err = canonical(parentPath)
+		if err != nil {
+			return Worktree{}, err
+		}
+		trees, e := listWorktrees(p.Path)
+		if e != nil {
+			return Worktree{}, e
+		}
+		found := false
+		for _, tree := range trees {
+			if tree.Path == parentPath {
+				found = true
+			}
+		}
+		if !found {
+			return Worktree{}, errors.New("parent must be a checkout of this project")
+		}
+		resolvePath = parentPath
+		base = "HEAD"
+	}
 	// Resolve to an object ID, so user input can never become a Git option.
-	commit, err := git(p.Path, "rev-parse", "--verify", "--end-of-options", base+"^{commit}")
+	commit, err := git(resolvePath, "rev-parse", "--verify", "--end-of-options", base+"^{commit}")
 	if err != nil {
 		return Worktree{}, fmt.Errorf("base branch does not resolve to a commit: %w", err)
 	}
@@ -348,7 +397,16 @@ func (m *Manager) createWorktree(projectID, name, base string, issue *linear.Wor
 	if _, err = git(p.Path, "worktree", "add", "-b", name, "--", path, commit); err != nil {
 		return Worktree{}, err
 	}
-	if issue != nil || m.state.WorktreeIssues[path].ID != "" {
+	previousLink, linked := m.state.WorktreeLinks[path]
+	if m.state.WorktreeLinks == nil {
+		m.state.WorktreeLinks = map[string]WorktreeLink{}
+	}
+	if parentPath != "" {
+		m.state.WorktreeLinks[path] = WorktreeLink{ParentPath: parentPath, BaseCommit: commit}
+	} else {
+		delete(m.state.WorktreeLinks, path)
+	}
+	if parentPath != "" || linked || issue != nil || m.state.WorktreeIssues[path].ID != "" {
 		if m.state.WorktreeIssues == nil {
 			m.state.WorktreeIssues = map[string]linear.WorktreeIssue{}
 		}
@@ -359,6 +417,11 @@ func (m *Manager) createWorktree(projectID, name, base string, issue *linear.Wor
 			delete(m.state.WorktreeIssues, path)
 		}
 		if err := m.save(); err != nil {
+			if linked {
+				m.state.WorktreeLinks[path] = previousLink
+			} else {
+				delete(m.state.WorktreeLinks, path)
+			}
 			if existed {
 				m.state.WorktreeIssues[path] = previous
 			} else {
@@ -368,10 +431,10 @@ func (m *Manager) createWorktree(projectID, name, base string, issue *linear.Wor
 			if _, cleanup := git(p.Path, "worktree", "remove", "--", path); cleanup == nil {
 				git(p.Path, "branch", "-d", "--", name)
 			}
-			return Worktree{}, fmt.Errorf("could not save the Linear link: %w", err)
+			return Worktree{}, fmt.Errorf("could not save worktree metadata: %w", err)
 		}
 	}
-	return Worktree{Path: path, Name: name, Branch: name, Issue: issue}, nil
+	return Worktree{Path: path, Name: name, Branch: name, Issue: issue, ParentPath: parentPath, BaseCommit: commit}, nil
 }
 func (m *Manager) RemoveWorktree(projectID, path string) error {
 	m.mu.Lock()
@@ -390,6 +453,9 @@ func (m *Manager) RemoveWorktree(projectID, path string) error {
 	}
 	found := false
 	for _, w := range trees {
+		if m.state.WorktreeLinks[w.Path].ParentPath == path {
+			return errors.New("remove child worktrees before removing their parent")
+		}
 		if w.Path == path && !w.Main {
 			found = true
 		}
@@ -407,6 +473,7 @@ func (m *Manager) RemoveWorktree(projectID, path string) error {
 	_, err = git(p.Path, "worktree", "remove", "--", path)
 	if err == nil {
 		delete(m.state.WorktreeIssues, path)
+		delete(m.state.WorktreeLinks, path)
 		err = m.save()
 	}
 	return err

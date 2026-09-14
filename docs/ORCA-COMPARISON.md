@@ -8,9 +8,9 @@ Checked against the installed Orca 1.4.178 CLI and its version-matched guides on
 | Worktrees from Linear | Ticket search, editable branch, saved issue link, ticket context in new agent drafts | Also supports richer ticket triage, state changes, comments, relations, and PR links |
 | Agent providers | Claude Code and Codex launch buttons; other CLIs can run in a shell | Additional managed provider choices, including OMP, Pi, and Grok |
 | Repository setup | Manual commands in each checkout | Configurable setup hooks and terminal defaults |
-| Worktree organization | Flat list within each project | Parent/child lineage, comments, and worktree status |
+| Worktree organization | Optional parent/child relationships; existing worktrees stay flat | Parent/child lineage, comments, and worktree status |
 | Scheduled work | Not implemented | Scheduled automations targeting workspaces or new worktrees |
-| Agent coordination | Independent terminal sessions | Structured messaging, task dependencies, dispatch, and worker coordination |
+| Agent coordination | Optional delegation, durable messages, explicit task status, and reviewed integration; independent sessions remain available | Structured messaging, task dependencies, dispatch, and worker coordination |
 | Browser and previews | Open external links and local image thumbnails | Worktree-scoped embedded browser and browser automation |
 | Remote environments | Local workspace | Remote environment management capabilities |
 | Programmatic control | Local HTTP API | A documented CLI for worktrees, terminals, browser, Linear, and automations |

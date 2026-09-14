@@ -31,6 +31,7 @@ func (m *Manager) Handler() http.Handler {
 	mux := http.NewServeMux()
 	m.linearRoutes(mux)
 	m.setupRoutes(mux)
+	m.coordinationRoutes(mux)
 	mux.HandleFunc("GET /api/workspace", func(w http.ResponseWriter, r *http.Request) { respond(w, m.Snapshot(), nil) })
 	mux.HandleFunc("POST /api/workspace/projects", func(w http.ResponseWriter, r *http.Request) {
 		var v struct{ Path, Name string }
@@ -42,11 +43,11 @@ func (m *Manager) Handler() http.Handler {
 	})
 	mux.HandleFunc("DELETE /api/workspace/projects/{id}", func(w http.ResponseWriter, r *http.Request) { respond(w, nil, m.RemoveProject(r.PathValue("id"))) })
 	mux.HandleFunc("POST /api/workspace/projects/{id}/worktrees", func(w http.ResponseWriter, r *http.Request) {
-		var v struct{ Name, Base, IssueID string }
+		var v struct{ Name, Base, IssueID, ParentPath string }
 		if !decode(w, r, &v) {
 			return
 		}
-		p, e := m.CreateLinkedWorktree(r.PathValue("id"), v.Name, v.Base, v.IssueID)
+		p, e := m.CreateLinkedWorktree(r.PathValue("id"), v.Name, v.Base, v.IssueID, v.ParentPath)
 		respond(w, p, e)
 	})
 	mux.HandleFunc("DELETE /api/workspace/projects/{id}/worktrees", func(w http.ResponseWriter, r *http.Request) {

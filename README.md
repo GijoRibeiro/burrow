@@ -61,6 +61,12 @@ Tab moves to the next visible pane; Shift+Tab moves to the previous one, wrappin
 
 macOS shortcuts: Cmd+K opens the terminal picker, Cmd+Shift+N creates a terminal, Cmd+B toggles the sidebar, Cmd+Enter focuses a pane, and Cmd+1–9 selects a visible pane. Linux uses Ctrl+Shift for application shortcuts, leaving ordinary Ctrl keys available to the shell.
 
+## Optional teamwork
+
+Right-click a checkout to **Create child worktree…**, or right-click an agent to **Delegate task…**. Delegation starts Claude or Codex in an independent child checkout with task context. Use **Tasks and inbox** to read messages, reply, follow status, and review completed changes before explicitly integrating them into the parent. Existing agents can opt in using the panel's connection instructions. Messages are persistent and read when agents check their inbox; ordinary terminals and worktrees continue to work independently.
+
+See [the teamwork guide](docs/COORDINATION.md) for the CLI, integration safeguards, and delivery behavior.
+
 ## Persistence and boundaries
 
 - Project and terminal metadata: `~/.cloovies/workspace.json`, saved atomically.

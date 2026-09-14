@@ -1,3 +1,8 @@
+import {
+  coordinationDialog,
+  delegationDialog,
+  type CoordinationContext,
+} from "./coordination";
 import { nativeHandler, setupDialog } from "./setup";
 import { worktreeDialog, issuePrompt } from "./worktree-dialog";
 import "./workspace.css";
@@ -90,7 +95,14 @@ class WorkspaceApp {
       ),
       legacy,
     );
-    sideBottom.append(button("Setup and tools", setupDialog, "subtle"));
+    sideBottom.append(
+      button(
+        "Tasks and inbox",
+        () => coordinationDialog(this.coordinationContext()),
+        "secondary",
+      ),
+      button("Setup and tools", setupDialog, "subtle"),
+    );
     this.sidebar.append(
       brand,
       sideHeading,
@@ -362,6 +374,10 @@ class WorkspaceApp {
   ): Promise<T> {
     this.revision++;
     const result = await api<T>(path, method, data);
+    await this.reloadState();
+    return result;
+  }
+  private async reloadState(): Promise<void> {
     this.revision++;
     this.alert.hidden = true;
     // A mutation must await a fresh snapshot even if a periodic poll is in flight.
@@ -371,7 +387,6 @@ class WorkspaceApp {
     this.persist();
     this.renderSidebar();
     this.renderCanvas();
-    return result;
   }
   private renderSidebar(): void {
     renderProjectList({
@@ -386,7 +401,9 @@ class WorkspaceApp {
       terminalColor: (id) => this.appearances[id]?.color || terminalColor(id),
       creatureName: (id) =>
         this.appearances[id]?.creature || defaultCreature(id),
-      newWorktree: (p) => this.newWorktree(p),
+      newWorktree: (p, parent) => this.newWorktree(p, parent),
+      delegate: (id) => delegationDialog(this.coordinationContext(), id),
+      coordination: (id) => coordinationDialog(this.coordinationContext(), id),
       removeProject: (p) => this.removeProject(p),
       newTerminal: (p, path) => this.newTerminal(p, path),
       removeWorktree: (p, path, name) => this.removeWorktree(p, path, name),
@@ -647,10 +664,23 @@ class WorkspaceApp {
       },
     );
   }
-  private newWorktree(p: Project): void {
-    worktreeDialog(p, async (values) => {
-      await this.mutate(`/projects/${p.id}/worktrees`, "POST", values);
-    });
+  private coordinationContext(): CoordinationContext {
+    return {
+      state: () => this.state,
+      color: (id) => this.appearances[id]?.color || terminalColor(id),
+      refresh: () => this.reloadState(),
+      show: (id) => this.show(id),
+      delegate: (id) => delegationDialog(this.coordinationContext(), id),
+    };
+  }
+  private newWorktree(p: Project, parentPath?: string): void {
+    worktreeDialog(
+      p,
+      async (values) => {
+        await this.mutate(`/projects/${p.id}/worktrees`, "POST", values);
+      },
+      parentPath,
+    );
   }
 
   private newTerminal(
