@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mkdirSync, writeFileSync, appendFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 async function add(page: Page, project: string, terminal: string) {
@@ -1247,6 +1247,41 @@ test("sidebar context menus manage background terminals and project actions", as
     .getByRole("button", { name: "Remove", exact: true })
     .click();
   await expect(toggle).toHaveCount(0);
+  const created = await request.post(
+    `/api/workspace/projects/${session.projectId}/worktrees`,
+    { data: { name: "menu-child", base: "HEAD" } },
+  );
+  expect(created.ok()).toBe(true);
+  await page.reload();
+  await project
+    .getByRole("button", { name: "Select Menus menu-child", exact: true })
+    .click({ button: "right" });
+  const childMenu = page.getByRole("menu", {
+    name: "Actions for Menus · menu-child",
+    exact: true,
+  });
+  await expect(
+    childMenu.getByRole("menuitem", { name: "Remove project from workspace…" }),
+  ).toHaveCount(0);
+  await childMenu
+    .getByRole("menuitem", { name: "Remove worktree…", exact: true })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Remove worktree", exact: true })
+    .click();
+  await expect(
+    project.getByRole("button", {
+      name: "Select Menus menu-child",
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  expect(existsSync(join(path, ".worktrees", "menu-child"))).toBe(false);
+  expect(
+    execFileSync("git", ["-C", path, "rev-parse", "--verify", "menu-child"], {
+      encoding: "utf8",
+    }).trim(),
+  ).toMatch(/^[a-f0-9]{40}$/);
   await project
     .getByRole("button", { name: "Toggle Menus", exact: true })
     .click({ button: "right" });
@@ -1258,9 +1293,31 @@ test("sidebar context menus manage background terminals and project actions", as
     path: info.outputPath("project-context-menu.png"),
     animations: "disabled",
   });
-  await projectMenu
+  await page.keyboard.press("Escape");
+  const mainCheckout = project.getByRole("button", {
+    name: "Select Menus main",
+    exact: true,
+  });
+  await mainCheckout.click({ button: "right" });
+  const checkoutMenu = page.getByRole("menu", {
+    name: "Actions for Menus · main",
+    exact: true,
+  });
+  await expect(
+    checkoutMenu.getByRole("menuitem", {
+      name: "Remove worktree…",
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(mainCheckout).toBeFocused();
+  await mainCheckout.press("Shift+F10");
+  await checkoutMenu
     .getByRole("menuitem", { name: "Remove project from workspace…" })
     .click();
+  await expect(page.getByRole("dialog")).toContainText(
+    "Files and Git worktrees stay on disk.",
+  );
   await page
     .getByRole("dialog")
     .getByRole("button", { name: "Remove project", exact: true })
