@@ -154,7 +154,57 @@ export function renderProjectList(ctx: SidebarContext): void {
             w.main ? w.branch || "main checkout" : w.name,
           ),
         );
-        if (w.main) selectTree.append(badge("MAIN", "main-badge"));
+        if (w.main) {
+          const main = badge("MAIN", "main-badge");
+          main.title = "Main project checkout";
+          selectTree.append(main);
+        }
+        selectTree.setAttribute("aria-haspopup", "menu");
+        row.dataset.worktreePath = w.path;
+        const openWorktreeMenu = (x: number, y: number) =>
+          contextMenu(
+            `${p.name} · ${w.branch || w.name}`,
+            x,
+            y,
+            [
+              {
+                label: "New terminal…",
+                run: () => ctx.newTerminal(p.id, w.path),
+              },
+              w.main
+                ? {
+                    label: "Remove project from workspace…",
+                    run: () => ctx.removeProject(p),
+                    danger: true,
+                  }
+                : {
+                    label: "Remove worktree…",
+                    run: () => ctx.removeWorktree(p, w.path, w.name),
+                    danger: true,
+                  },
+            ],
+            () =>
+              [...ctx.projects.querySelectorAll<HTMLElement>(".worktree-row")]
+                .find((node) => node.dataset.worktreePath === w.path)
+                ?.querySelector<HTMLButtonElement>(".worktree-label")
+                ?.focus({ preventScroll: true }),
+            "var(--ink)",
+          );
+        row.addEventListener("contextmenu", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          openWorktreeMenu(event.clientX, event.clientY);
+        });
+        selectTree.addEventListener("keydown", (event) => {
+          if (
+            event.key === "ContextMenu" ||
+            (event.shiftKey && event.key === "F10")
+          ) {
+            event.preventDefault();
+            const bounds = selectTree.getBoundingClientRect();
+            openWorktreeMenu(bounds.left + 12, bounds.bottom);
+          }
+        });
         row.append(
           selectTree,
           button(
