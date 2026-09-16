@@ -25,6 +25,12 @@ To create an agent directly, choose **Team canvas → + Agent**, or right-click
 empty canvas space. Select Claude or Codex, choose a folder, and start. A head
 agent or Git repository is not required.
 
+When adding a folder without Git, choose **Create Git repository** or **Keep as
+folder**. You can also select a **No Git** project in the head picker and create
+its repository there. This initializes Git locally without staging, committing,
+or publishing your files. Heads can help prepare the first commit required for
+worker worktrees.
+
 You can reopen **Setup and tools** from the sidebar. Use **⌘W** to close the window, **⌘M** to minimize, **⌘Q** to quit, and **⌃⌘F** for full screen. Drag the app's wordmark or empty toolbar area to move the window.
 
 No projects, conversations, credentials, or terminal sessions from the developer's computer are included. Data is stored locally in your home folder; CLI accounts are managed by their providers. An internet connection is needed for installing tools and using agents or Linear. Git and tmux remain installed when the app is removed.

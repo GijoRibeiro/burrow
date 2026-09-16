@@ -1,4 +1,5 @@
 import { api, ApiError } from "./api";
+import { offerGitSetup } from "./git-setup";
 import { button, el } from "./dom";
 import { nativeHandler } from "./setup";
 import type { Project } from "./types";
@@ -460,10 +461,11 @@ export function projectDialog(
     renderRepositories();
     try {
       if (source === "local") {
-        const project = await api<Project>("/projects", "POST", {
+        let project = await api<Project>("/projects", "POST", {
           path: path.value,
           name: localName.value,
         });
+        project = await offerGitSetup(project);
         await ready(project);
         d.close();
       } else if (selected) {
