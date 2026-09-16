@@ -2032,3 +2032,78 @@ test("canvas context menus attach existing agents without replacing their sessio
     page.getByRole("dialog", { name: "Review team plan" }),
   ).toBeVisible();
 });
+
+test("message composers grow for multiline and wrapped drafts, then shrink after sending", async ({
+  page,
+}, info) => {
+  await page.goto("/");
+  const project = await (
+    await page.request.post("/api/workspace/projects", {
+      data: {
+        path: join(process.env.CLOOVIES_E2E_ROOT!, "Newbit"),
+        name: "Newbit",
+      },
+    })
+  ).json();
+  const agent = await (
+    await page.request.post("/api/workspace/terminals", {
+      data: {
+        projectId: project.id,
+        path: project.path,
+        name: "Growing input",
+        program: "claude",
+      },
+    })
+  ).json();
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Show Growing input", exact: true })
+    .click();
+  const pane = page.locator(`[data-terminal-id="${agent.id}"]`),
+    input = pane.locator(".message-input");
+  await expect(pane.locator(".connection-state")).toHaveText("Live");
+  const initial = await input.evaluate((el) => el.clientHeight);
+  const text = Array.from(
+    { length: 7 },
+    (_, i) =>
+      `Line ${i + 1}: Read this complete multiline message. Keep the full ticket context visible when the panel gets narrower.`,
+  ).join("\n");
+  await input.fill(text);
+  await expect
+    .poll(() => input.evaluate((el) => el.clientHeight))
+    .toBeGreaterThan(initial * 3);
+  await expect
+    .poll(() => input.evaluate((el) => el.scrollHeight - el.clientHeight))
+    .toBeLessThanOrEqual(1);
+  await page.screenshot({ path: info.outputPath("multiline-composer.png") });
+  const wide = await input.evaluate((el) => el.clientHeight);
+  await page.setViewportSize({ width: 650, height: 900 });
+  await expect
+    .poll(() => input.evaluate((el) => el.clientHeight))
+    .toBeGreaterThan(wide);
+  await expect
+    .poll(() => input.evaluate((el) => el.scrollHeight - el.clientHeight))
+    .toBeLessThanOrEqual(1);
+  await page.reload();
+  await expect(input).toHaveValue(text);
+  await expect
+    .poll(() => input.evaluate((el) => el.scrollHeight - el.clientHeight))
+    .toBeLessThanOrEqual(1);
+  await input.fill(
+    Array.from({ length: 60 }, (_, i) => `Long draft line ${i}`).join("\n"),
+  );
+  await expect(pane).toHaveClass(/has-long-draft/);
+  await expect
+    .poll(() => input.evaluate((el) => el.scrollHeight - el.clientHeight))
+    .toBeLessThanOrEqual(1);
+  await input.fill("Ready to send");
+  await expect(pane).not.toHaveClass(/has-long-draft/);
+  await expect(
+    pane.getByRole("button", { name: "Send message", exact: true }),
+  ).toBeEnabled();
+  await input.press("Enter");
+  await expect(input).toHaveValue("");
+  await expect
+    .poll(() => input.evaluate((el) => el.clientHeight))
+    .toBeLessThanOrEqual(initial + 2);
+});

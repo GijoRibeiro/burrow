@@ -585,7 +585,8 @@ a {
 .message-input {
   resize: none;
   flex: 1;
-  max-height: 110px;
+  max-height: none;
+  overflow-y: hidden;
   min-height: 30px;
   background: none;
   border: 0;
@@ -2521,4 +2522,20 @@ textarea {
     max-height: 250px;
     flex: none;
   }
+}
+
+/* The composer follows its complete text, including soft-wrapped lines. */
+.composer {
+  flex: 0 0 auto;
+  align-items: flex-end;
+}
+.terminal-pane.has-long-draft {
+  overflow-y: auto;
+}
+.terminal-pane.has-long-draft .pane-surface {
+  flex: 0 0 120px;
+}
+.terminal-pane.has-long-draft .pane-header,
+.terminal-pane.has-long-draft .pane-context {
+  flex-shrink: 0;
 }

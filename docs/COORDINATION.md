@@ -51,6 +51,9 @@ the graph. **Open in terminals** adds it to the regular terminal layout. Switchi
 views preserves the split layout, drafts, creatures, and running processes. Tab
 and Shift+Tab move among agents on the canvas, or visible panes in terminal view.
 Canvas positions, zoom, view choice, and sidebar filtering persist locally.
+Message inputs grow with line breaks and wrapped text, including restored drafts
+and panel/font resizing. Very long drafts use the pane’s scroll area rather than
+a small scrolling input, and the composer shrinks again after sending.
 
 Launch progress is saved. **Retry remaining workers** resumes a partial launch
 without duplicating successful workers, including after restarting the app. A
