@@ -786,7 +786,7 @@ class WorkspaceApp {
   private addProject(): void {
     dialog(
       "Add a project",
-      "Choose a local Git repository. Its existing worktrees will appear automatically.",
+      "Choose any local folder for your terminals and agents. Git repositories also show their worktrees.",
       [
         {
           name: "path",
@@ -1070,11 +1070,14 @@ class WorkspaceApp {
     const options = this.state.projects.flatMap((p) =>
       p.worktrees.map((w) => ({
         value: JSON.stringify([p.id, w.path]),
-        label: `${p.name} / ${w.main ? "main checkout" : w.name} · ${w.branch || "detached"}`,
+        label:
+          p.git === false
+            ? `${p.name} / project folder`
+            : `${p.name} / ${w.main ? "main checkout" : w.name} · ${w.branch || "detached"}`,
       })),
     );
     if (!options.length) {
-      this.error("No available project folders. Add a Git repository first.");
+      this.error("No available project folders. Add a folder first.");
       return;
     }
     dialog(

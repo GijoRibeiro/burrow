@@ -16,6 +16,7 @@ export interface Worktree {
   main: boolean;
 }
 export interface Project {
+  git?: boolean;
   id: string;
   name: string;
   path: string;

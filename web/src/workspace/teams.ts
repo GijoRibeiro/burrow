@@ -8,7 +8,9 @@ export function newHeadDialog(
   existing?: Session,
 ): void {
   const folders = state.projects
-    .filter((p) => !existing || p.id === existing.projectId)
+    .filter(
+      (p) => p.git !== false && (!existing || p.id === existing.projectId),
+    )
     .flatMap((p) =>
       p.worktrees.map((w) => ({
         value: JSON.stringify([p.id, w.path]),
@@ -17,8 +19,8 @@ export function newHeadDialog(
     );
   if (!folders.length) {
     dialog(
-      "Add a project first",
-      "Your head agent needs a project checkout to create its workers from.",
+      "A Git project is needed for a head",
+      "Heads create workers in Git worktrees. Add a Git repository, or start individual agents directly in your project folder.",
       [],
       "Got it",
       async () => {},

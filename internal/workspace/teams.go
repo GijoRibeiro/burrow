@@ -92,6 +92,9 @@ func (m *Manager) preparePlan(headID string, v PlanRequest) (TeamPlan, error) {
 	if err != nil || head.Role != "head" {
 		return TeamPlan{}, errors.New("only a head agent can propose a team plan")
 	}
+	if err = requireGitCheckout(head.Path); err != nil {
+		return TeamPlan{}, err
+	}
 	v.Title, v.Summary = strings.TrimSpace(v.Title), strings.TrimSpace(v.Summary)
 	if v.Title == "" || len(v.Title) > 160 || v.Summary == "" || len(v.Summary) > 12000 || len(v.Items) < 1 || len(v.Items) > 12 {
 		return TeamPlan{}, errors.New("provide a title, a summary, and 1–12 worker assignments")

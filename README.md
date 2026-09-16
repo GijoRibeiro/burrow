@@ -44,7 +44,7 @@ CLOOVIES_BACKEND_URL=http://127.0.0.1:4340 npm run dev
 
 ## Working in the workspace
 
-1. **Add project**: choose a Git repository with the native folder picker, or enter its path. Existing worktrees are discovered automatically, including worktrees created outside Cloovies. Adding a linked worktree resolves to its parent project.
+1. **Add project**: choose any local folder with the native folder picker, or enter its path. For Git repositories, existing worktrees are discovered automatically, including worktrees created outside Cloovies. Adding a linked worktree resolves to its parent project.
 2. **Create worktree**: use the project's **+** button. Choose Manual or **From Linear** to search your tickets, select one, and prefill an editable branch name. Linear links remain with the worktree; new agent drafts include the ticket context. For manual creation, give it a name and a starting branch or commit. New worktrees live in `<project>/.worktrees/<name>` on a branch with the same name. The folder is excluded through Git's local `info/exclude`; the committed `.gitignore` is unchanged.
 3. **New terminal**: choose any project/worktree and a session name. Choose **Claude Code** (the default), **Codex**, or **Shell**. Both agents start in YOLO mode, including after restart. Codex opens its native CLI in Terminal view.
 4. **Choose terminals**: show or hide sessions from across all projects. Project selection does not replace the visible canvas. Use a pane's split buttons to add another terminal to its right or below.
@@ -62,6 +62,12 @@ Tab moves to the next visible pane; Shift+Tab moves to the previous one, wrappin
 macOS shortcuts: Cmd+K opens the terminal picker, Cmd+Shift+N creates a terminal, Cmd+B toggles the sidebar, Cmd+Enter focuses a pane, and Cmd+1–9 selects a visible pane. Linux uses Ctrl+Shift for application shortcuts, leaving ordinary Ctrl keys available to the shell.
 
 ## Optional teamwork
+
+Projects can be any local folder. Open a folder and start Claude, Codex, or shell
+terminals without initializing Git. Git repositories also discover existing
+worktrees; creating worktrees and delegated teams requires Git and a first commit.
+If you initialize Git later, the app detects it while keeping the same project
+and terminal sessions.
 
 Ask a **Head agent** to work on your Linear tickets and it starts one worker
 and terminal per ticket immediately. Discuss scope in its terminal whenever you need to. **Team canvas** shows
