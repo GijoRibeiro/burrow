@@ -5,13 +5,16 @@ import type { Session, TeamPlan, Workspace } from "./types";
 export function newHeadDialog(
   state: Workspace,
   ready: (head: Session) => Promise<void>,
+  existing?: Session,
 ): void {
-  const folders = state.projects.flatMap((p) =>
-    p.worktrees.map((w) => ({
-      value: JSON.stringify([p.id, w.path]),
-      label: `${p.name} / ${w.branch || w.name}`,
-    })),
-  );
+  const folders = state.projects
+    .filter((p) => !existing || p.id === existing.projectId)
+    .flatMap((p) =>
+      p.worktrees.map((w) => ({
+        value: JSON.stringify([p.id, w.path]),
+        label: `${p.name} / ${w.branch || w.name}`,
+      })),
+    );
   if (!folders.length) {
     dialog(
       "Add a project first",
@@ -26,7 +29,14 @@ export function newHeadDialog(
     "Meet your head agent",
     "Start with a conversation. Your head can read Linear, suggest a team, and coordinate workers after you review its plan.",
     [
-      { name: "folder", label: "Project / checkout", options: folders },
+      {
+        name: "folder",
+        label: "Project / checkout",
+        options: folders,
+        value: existing
+          ? JSON.stringify([existing.projectId, existing.path])
+          : folders[0].value,
+      },
       {
         name: "program",
         label: "Head agent",
@@ -41,8 +51,9 @@ export function newHeadDialog(
         name: "goal",
         label: "What are we working on?",
         multiline: true,
-        value:
-          "Check my assigned Linear tickets and help me choose three to work on today. Discuss the scope with me, then propose one worker per ticket and coordinate the team.",
+        value: existing
+          ? `Help me coordinate my existing agent ${existing.name}. It will be attached to you after startup. Briefly acknowledge, then wait for me to describe the work. Do not create workers yet.`
+          : "Check my assigned Linear tickets and help me choose three to work on today. Discuss the scope with me, then propose one worker per ticket and coordinate the team.",
       },
     ],
     "Start the conversation",

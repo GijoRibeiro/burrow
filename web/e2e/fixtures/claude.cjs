@@ -19,6 +19,12 @@ process.stdin.on('data', data => {
     const text = input.slice(0, end).replaceAll('\x1b[200~', '').replaceAll('\x1b[201~', '');
     input = input.slice(end + 1);
     if (text === '/exit') process.exit(0);
+    if (text.includes('You are now attached to a Burrow head.')) {
+      const { execFileSync } = require('node:child_process');
+      const run = (...args) => JSON.parse(execFileSync(process.env.BURROW_CLI, args, {encoding:'utf8'}));
+      for (const message of run('inbox')) run('ack', message.id);
+      run('send', 'parent', 'Existing agent connected; current work preserved.');
+    }
     const response = `Claude received: ${text}`;
     fs.appendFileSync(transcript, JSON.stringify({ type: 'user', uuid: `u${++turn}`, message: { content: text } }) + '\n' + JSON.stringify({ type: 'assistant', uuid: `a${turn}`, message: { content: response, stop_reason: 'end_turn' } }) + '\n');
     process.stdout.write(response.replaceAll('\n', '\r\n') + '\r\n');

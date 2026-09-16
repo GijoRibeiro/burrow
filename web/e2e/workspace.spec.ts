@@ -1877,3 +1877,233 @@ test("head proposes a team, waits for review, and coordinates workers on a persi
     (await (await page.request.get("/api/workspace")).json()).projects.length,
   ).toBe(after.projects.length);
 });
+
+test("canvas context menus attach existing agents without replacing their sessions", async ({
+  page,
+}) => {
+  const path = join(process.env.CLOOVIES_E2E_ROOT!, "Canvas attachment");
+  mkdirSync(path);
+  execFileSync("git", ["init", "-b", "main", path]);
+  execFileSync("git", [
+    "-C",
+    path,
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@localhost",
+    "commit",
+    "--allow-empty",
+    "-m",
+    "Initial",
+  ]);
+  const project = await (
+    await page.request.post("/api/workspace/projects", {
+      data: { path, name: "Canvas attachment" },
+    })
+  ).json();
+  const head = await (
+    await page.request.post("/api/workspace/heads", {
+      data: {
+        projectId: project.id,
+        path: project.path,
+        name: "Attach head",
+        program: "codex",
+        goal: "Help coordinate",
+      },
+    })
+  ).json();
+  const agent = await (
+    await page.request.post("/api/workspace/terminals", {
+      data: {
+        projectId: project.id,
+        path: project.path,
+        name: "Independent",
+        program: "claude",
+      },
+    })
+  ).json();
+  const pid = tmux(
+    "display-message",
+    "-p",
+    "-t",
+    `=cw-${agent.id}:`,
+    "#{pane_pid}",
+  );
+  await page.goto("/");
+  await page.getByRole("button", { name: "Team canvas", exact: true }).click();
+  await page.getByLabel("Team shown on canvas").selectOption("");
+  const card = page.locator(`[data-node-id="${agent.id}"]`);
+  await card.click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Rename agent…" }).click();
+  await page
+    .getByRole("dialog")
+    .getByLabel("Name", { exact: true })
+    .fill("Existing designer");
+  await page.getByRole("button", { name: "Save name" }).click();
+  await expect(card).toContainText("Existing designer");
+  await card.locator(".team-node-open").focus();
+  await page.keyboard.press("Shift+F10");
+  await page.getByRole("menuitem", { name: "Attach to a head…" }).click();
+  await page
+    .getByRole("dialog")
+    .getByLabel("Head agent", { exact: true })
+    .selectOption(head.id);
+  await page
+    .getByRole("button", { name: "Attach and prepare message" })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(
+    page.getByRole("textbox", {
+      name: "Message to Existing designer",
+      exact: true,
+    }),
+  ).toHaveValue(/You are now attached to a Burrow head/);
+  let state = await (await page.request.get("/api/workspace")).json();
+  expect(state.terminals.find((t: any) => t.id === agent.id).headId).toBe(
+    head.id,
+  );
+  expect(
+    state.projects.find((p: any) => p.id === project.id).worktrees,
+  ).toHaveLength(1);
+  expect(
+    tmux("display-message", "-p", "-t", `=cw-${agent.id}:`, "#{pane_pid}"),
+  ).toBe(pid);
+  await page.getByRole("button", { name: "Send message", exact: true }).click();
+  await expect
+    .poll(async () => {
+      const data = await (
+        await page.request.get("/api/workspace/coordination")
+      ).json();
+      return data.messages.some(
+        (m: any) =>
+          m.from === agent.id &&
+          m.to === head.id &&
+          m.text === "Existing agent connected; current work preserved.",
+      );
+    })
+    .toBe(true);
+  await page.reload();
+  await expect(card).toContainText("WORKER");
+  await card.click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Detach from head" }).click();
+  await expect(card).toHaveCount(0); // It left the selected head's team.
+  await page.getByLabel("Team shown on canvas").selectOption("");
+  await expect(card).toContainText("INDEPENDENT");
+  await card.click({ button: "right" });
+  await page
+    .getByRole("menuitem", { name: "Create a head for this agent…" })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByLabel("Name", { exact: true })
+    .fill("New attached head");
+  await page.getByRole("button", { name: "Start the conversation" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  state = await (await page.request.get("/api/workspace")).json();
+  const created = state.terminals.find(
+    (t: any) => t.name === "New attached head",
+  );
+  expect(state.terminals.find((t: any) => t.id === agent.id).headId).toBe(
+    created.id,
+  );
+  expect(
+    tmux("display-message", "-p", "-t", `=cw-${agent.id}:`, "#{pane_pid}"),
+  ).toBe(pid);
+  await card.click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Terminate agent…" }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Stop terminal", exact: true })
+    .click();
+  await expect(card).toContainText("Agent stopped");
+  await card.click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Remove agent…" }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Remove", exact: true })
+    .click();
+  await expect(card).toHaveCount(0);
+  await page.getByLabel("Team shown on canvas").selectOption(head.id);
+  await page.locator(`[data-node-id="${head.id}"]`).click();
+  await page
+    .getByRole("button", { name: "Review head plan", exact: true })
+    .click();
+  await expect(
+    page.getByRole("dialog", { name: "Review team plan" }),
+  ).toBeVisible();
+});
+
+test("message composers grow for multiline and wrapped drafts, then shrink after sending", async ({
+  page,
+}, info) => {
+  await page.goto("/");
+  const project = await (
+    await page.request.post("/api/workspace/projects", {
+      data: {
+        path: join(process.env.CLOOVIES_E2E_ROOT!, "Newbit"),
+        name: "Newbit",
+      },
+    })
+  ).json();
+  const agent = await (
+    await page.request.post("/api/workspace/terminals", {
+      data: {
+        projectId: project.id,
+        path: project.path,
+        name: "Growing input",
+        program: "claude",
+      },
+    })
+  ).json();
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Show Growing input", exact: true })
+    .click();
+  const pane = page.locator(`[data-terminal-id="${agent.id}"]`),
+    input = pane.locator(".message-input");
+  await expect(pane.locator(".connection-state")).toHaveText("Live");
+  const initial = await input.evaluate((el) => el.clientHeight);
+  const text = Array.from(
+    { length: 7 },
+    (_, i) =>
+      `Line ${i + 1}: Read this complete multiline message. Keep the full ticket context visible when the panel gets narrower.`,
+  ).join("\n");
+  await input.fill(text);
+  await expect
+    .poll(() => input.evaluate((el) => el.clientHeight))
+    .toBeGreaterThan(initial * 3);
+  await expect
+    .poll(() => input.evaluate((el) => el.scrollHeight - el.clientHeight))
+    .toBeLessThanOrEqual(1);
+  await page.screenshot({ path: info.outputPath("multiline-composer.png") });
+  const wide = await input.evaluate((el) => el.clientHeight);
+  await page.setViewportSize({ width: 650, height: 900 });
+  await expect
+    .poll(() => input.evaluate((el) => el.clientHeight))
+    .toBeGreaterThan(wide);
+  await expect
+    .poll(() => input.evaluate((el) => el.scrollHeight - el.clientHeight))
+    .toBeLessThanOrEqual(1);
+  await page.reload();
+  await expect(input).toHaveValue(text);
+  await expect
+    .poll(() => input.evaluate((el) => el.scrollHeight - el.clientHeight))
+    .toBeLessThanOrEqual(1);
+  await input.fill(
+    Array.from({ length: 60 }, (_, i) => `Long draft line ${i}`).join("\n"),
+  );
+  await expect(pane).toHaveClass(/has-long-draft/);
+  await expect
+    .poll(() => input.evaluate((el) => el.scrollHeight - el.clientHeight))
+    .toBeLessThanOrEqual(1);
+  await input.fill("Ready to send");
+  await expect(pane).not.toHaveClass(/has-long-draft/);
+  await expect(
+    pane.getByRole("button", { name: "Send message", exact: true }),
+  ).toBeEnabled();
+  await input.press("Enter");
+  await expect(input).toHaveValue("");
+  await expect
+    .poll(() => input.evaluate((el) => el.clientHeight))
+    .toBeLessThanOrEqual(initial + 2);
+});

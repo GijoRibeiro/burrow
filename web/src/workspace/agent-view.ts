@@ -5,6 +5,7 @@ import claudeIcon from "../../assets/brands/claude.svg";
 import codexIcon from "../../assets/brands/openai.svg";
 
 export interface Activity {
+  processStatus?: string;
   kind: "shell" | "claude" | "codex";
   canMessage: boolean;
   status:
@@ -31,6 +32,10 @@ export class AgentView {
   );
   private error = el("p", "agent-error");
   private launching = false;
+  private progressKey = "";
+  private progressAt = Date.now();
+  private wasWorking = false;
+  private interruptButton: HTMLButtonElement;
   private activity?: Activity;
   private screen = "";
   private visibleScreen = "";
@@ -43,8 +48,16 @@ export class AgentView {
     private terminalId: string,
     private openTerminal: () => void,
     private startAgent: (program: "claude" | "codex") => Promise<void>,
+    interrupt: () => void,
   ) {
     this.name = name;
+    this.interruptButton = button(
+      "Interrupt current response",
+      interrupt,
+      "terminal-notice",
+      "Interrupt response",
+    );
+    this.interruptButton.hidden = true;
     const info = el("div", "agent-info");
     const status = el("div", "agent-status");
     status.setAttribute("role", "status");
@@ -55,7 +68,12 @@ export class AgentView {
     this.content.tabIndex = 0;
     this.content.setAttribute("aria-label", "Agent conversation and output");
     this.error.setAttribute("role", "alert");
-    this.element.append(this.notice, this.error, this.content);
+    this.element.append(
+      this.notice,
+      this.interruptButton,
+      this.error,
+      this.content,
+    );
     this.setCreature(name);
   }
   showError(text: string): void {
@@ -93,13 +111,31 @@ export class AgentView {
     const working =
       live &&
       !attention &&
+      a?.processStatus !== "idle" &&
       (a?.status === "working" ||
         /(?:esc to interrupt)/i.test(this.visibleScreen));
     this.element.classList.toggle("is-thinking", working);
     this.heading.classList.toggle("is-thinking", working);
     this.element.classList.toggle("needs-attention", attention);
     this.heading.classList.toggle("needs-attention", attention);
-    this.notice.hidden = !attention;
+    const progressKey = JSON.stringify([a?.messages, a?.tools, a?.tool]);
+    if (!working || !this.wasWorking || progressKey !== this.progressKey)
+      this.progressAt = Date.now();
+    this.progressKey = progressKey;
+    this.wasWorking = working;
+    const stalled = working && Date.now() - this.progressAt >= 60_000;
+    const providerError =
+      live &&
+      /(?:API Error|rate limit|overloaded|retrying|connection error|authentication failed|timed out)/i.test(
+        this.visibleScreen,
+      );
+    this.notice.hidden = !attention && !stalled && !providerError;
+    this.notice.textContent = attention
+      ? "Input needed · Open terminal →"
+      : providerError
+        ? "Provider needs attention · Open terminal →"
+        : "No new progress for a minute · Open terminal →";
+    this.interruptButton.hidden = !stalled;
     const label = !live
       ? this.connection
       : attention

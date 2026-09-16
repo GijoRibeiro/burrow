@@ -540,3 +540,19 @@
     transition: none;
   }
 }
+
+.head-plan-notice {
+  flex: none;
+  width: 100%;
+  padding: 10px 14px;
+  border: 0;
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--terminal-color) 45%, transparent);
+  background: color-mix(in srgb, var(--terminal-color) 12%, var(--bg));
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.head-plan-notice:hover {
+  background: color-mix(in srgb, var(--terminal-color) 20%, var(--bg));
+}

@@ -193,6 +193,32 @@ func (m *Manager) agentAction(w http.ResponseWriter, r *http.Request) {
 		respond(w, m.Inbox(actor.ID), nil)
 	case "ack":
 		respond(w, nil, m.Acknowledge(actor.ID, v.MessageID))
+	case "team":
+		rows := []Terminal{}
+		snapshot := m.Snapshot()
+		headID := actor.HeadID
+		if actor.Role == "head" {
+			headID = actor.ID
+		}
+		if headID == "" && actor.TaskID != "" {
+			for _, task := range snapshot.Tasks {
+				if task.ID == actor.TaskID {
+					headID = task.ParentID
+				}
+			}
+		}
+		for _, t := range snapshot.Terminals {
+			belongs := t.ID == actor.ID || (headID != "" && (t.ID == headID || t.HeadID == headID))
+			for _, task := range snapshot.Tasks {
+				if headID != "" && task.ParentID == headID && task.AgentID == t.ID {
+					belongs = true
+				}
+			}
+			if isAgent(t) && belongs {
+				rows = append(rows, t)
+			}
+		}
+		respond(w, rows, nil)
 	case "agents":
 		rows := []Terminal{}
 		for _, t := range m.Snapshot().Terminals {
@@ -215,6 +241,9 @@ func (m *Manager) agentAction(w http.ResponseWriter, r *http.Request) {
 		m.mu.Unlock()
 		respond(w, t, e)
 	case "send":
+		if v.To == "parent" && actor.HeadID != "" {
+			v.To = actor.HeadID
+		}
 		if v.To == "parent" {
 			m.mu.Lock()
 			t, e := m.task(actor.TaskID)

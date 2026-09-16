@@ -15,14 +15,15 @@ import (
 // Activity is a read-only companion to the PTY. Only human-facing conversation
 // text is returned; tool payloads and reasoning stay out of the quiet view.
 type Activity struct {
-	CanMessage bool `json:"canMessage"`
-	paneID     string
-	Kind       string                `json:"kind"`
-	Status     string                `json:"status"`
-	Messages   []ConversationMessage `json:"messages"`
-	Tool       string                `json:"tool,omitempty"`
-	Tools      int                   `json:"tools"`
-	Truncated  bool                  `json:"truncated"`
+	ProcessStatus string `json:"processStatus,omitempty"`
+	CanMessage    bool   `json:"canMessage"`
+	paneID        string
+	Kind          string                `json:"kind"`
+	Status        string                `json:"status"`
+	Messages      []ConversationMessage `json:"messages"`
+	Tool          string                `json:"tool,omitempty"`
+	Tools         int                   `json:"tools"`
+	Truncated     bool                  `json:"truncated"`
 }
 type ConversationMessage struct {
 	ID   string `json:"id"`
@@ -30,6 +31,7 @@ type ConversationMessage struct {
 	Text string `json:"text"`
 }
 type claudeSession struct {
+	Status    string `json:"status"`
 	PID       int    `json:"pid"`
 	SessionID string `json:"sessionId"`
 	Cwd       string `json:"cwd"`
@@ -130,13 +132,25 @@ func (m *Manager) Activity(id string) (Activity, error) {
 	data, truncated, err := conversationTail(path)
 	if err != nil {
 		a.Status = "unavailable"
+		applySessionStatus(&a, session.Status)
 		return a, nil
 	}
 	a = parseConversation(data)
 	a.CanMessage = foreground
 	a.paneID = fields[2]
 	a.Truncated = a.Truncated || truncated
+	applySessionStatus(&a, session.Status)
 	return a, nil
+}
+
+// Recent Claude versions publish live status even when an interrupted turn has
+// no final transcript record. Do not keep animating stale work after it is idle.
+func applySessionStatus(a *Activity, status string) {
+	a.ProcessStatus = status
+	if status == "idle" {
+		a.Status = "ready"
+		a.Tool = ""
+	}
 }
 
 func descendantDepth(child, root int, parents map[int]int) int {

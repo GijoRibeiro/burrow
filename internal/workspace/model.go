@@ -36,6 +36,7 @@ type Worktree struct {
 	Main       bool                  `json:"main"`
 }
 type Terminal struct {
+	HeadID    string    `json:"headId,omitempty"`
 	Role      string    `json:"role,omitempty"`
 	Goal      string    `json:"goal,omitempty"`
 	TaskID    string    `json:"taskId,omitempty"`

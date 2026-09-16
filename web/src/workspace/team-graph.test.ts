@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
-import { arrangeTeam, teamNodes } from "./team-graph";
+import { describe, expect, it, vi } from "vitest";
+import { arrangeTeam, teamNodes, TeamGraph } from "./team-graph";
 import type { Workspace } from "./types";
 
 describe("team relationships", () => {
@@ -52,4 +52,43 @@ describe("team relationships", () => {
     expect(Object.keys(layout)).toHaveLength(2);
     expect(Number.isFinite(layout.one.y)).toBe(true);
   });
+});
+
+it("opens canvas actions without capturing macOS Control-click as a drag", () => {
+  localStorage.clear();
+  const state = {
+    terminals: [
+      { id: "solo", program: "claude", name: "Solo", status: "running" },
+    ],
+    projects: [],
+  } as unknown as Workspace;
+  const menu = vi.fn();
+  const graph = new TeamGraph({
+    state: () => state,
+    color: () => "#aaaaaa",
+    creature: () => "Grook",
+    select: () => {},
+    newHead: () => {},
+    review: () => {},
+    task: () => {},
+    menu,
+  });
+  graph.update("");
+  const surface = graph.element.querySelector<HTMLElement>(".team-surface")!;
+  const capture = vi.fn();
+  surface.setPointerCapture = capture;
+  const card = graph.element.querySelector<HTMLElement>(".team-node-open")!;
+  card.dispatchEvent(
+    new MouseEvent("pointerdown", { bubbles: true, button: 0, ctrlKey: true }),
+  );
+  expect(capture).not.toHaveBeenCalled();
+  card.dispatchEvent(
+    new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 12,
+      clientY: 24,
+    }),
+  );
+  expect(menu).toHaveBeenCalledWith("solo", 12, 24, expect.any(Function));
 });
