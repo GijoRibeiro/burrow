@@ -7,6 +7,7 @@ import type { Project, Session, Workspace } from "./types";
 export interface SidebarContext {
   projects: HTMLElement;
   state: Workspace;
+  onlyActive?: boolean;
   search: HTMLInputElement;
   tree: Tree | null;
   active: string | null;
@@ -36,6 +37,15 @@ export function renderProjectList(ctx: SidebarContext): void {
   const visible = new Set(ids(ctx.tree));
   for (const p of ctx.state.projects) {
     const terminals = ctx.state.terminals.filter((t) => t.projectId === p.id);
+    if (
+      ctx.onlyActive &&
+      !terminals.some(
+        (t) =>
+          t.status === "running" &&
+          (t.program === "claude" || t.program === "codex"),
+      )
+    )
+      continue;
     if (
       filter &&
       ![

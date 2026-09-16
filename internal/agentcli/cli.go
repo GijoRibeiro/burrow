@@ -20,6 +20,12 @@ import (
 )
 
 const Help = `burrow — workspace agent coordination (JSON output)
+  linear [search]                        Your open Linear tickets, or search
+  issue <identifier>                     Read full Linear ticket context
+  plans                                  Read your proposed/approved team plans
+  propose <JSON|->                       Propose workers for user review (head only)
+    JSON: {"title":"...","summary":"...","items":[{"issueId":"ENG-1","name":"eng-1","program":"codex","title":"...","instructions":"..."}]}
+  send user <message>                    Send an update to the user in Tasks and inbox
   agents                                 List agents and IDs
   tasks                                  List your assigned/delegated tasks
   task [task-id]                         Read task context
@@ -97,9 +103,37 @@ func Run(args []string, out io.Writer) error {
 		return string(data), e
 	}
 	switch args[0] {
-	case "agents", "tasks", "inbox":
+	case "agents", "tasks", "inbox", "plans":
 		if err := need(1); err != nil {
 			return err
+		}
+	case "linear", "issue":
+		if len(args) > 2 || (args[0] == "issue" && len(args) != 2) {
+			return errors.New("usage: linear [search] or issue <identifier>")
+		}
+		if len(args) == 2 {
+			action.Query = args[1]
+		}
+	case "propose":
+		if err := need(2); err != nil {
+			return err
+		}
+		raw := args[1]
+		if raw == "-" {
+			data, e := io.ReadAll(io.LimitReader(os.Stdin, 60001))
+			if e != nil {
+				return e
+			}
+			raw = string(data)
+		}
+		if len(raw) > 60000 {
+			return errors.New("plan is too large")
+		}
+		action.Plan = &workspace.PlanRequest{}
+		decoder := json.NewDecoder(strings.NewReader(raw))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(action.Plan); err != nil {
+			return fmt.Errorf("invalid plan JSON: %w", err)
 		}
 	case "task":
 		if len(args) > 2 {

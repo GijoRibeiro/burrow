@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/gijo/cloovies/internal/linear"
 )
 
 type WorktreeLink struct {
@@ -15,21 +17,25 @@ type WorktreeLink struct {
 	BaseCommit string `json:"baseCommit"`
 }
 type Task struct {
-	ParentBranch     string    `json:"parentBranch"`
-	ID               string    `json:"id"`
-	ProjectID        string    `json:"projectId"`
-	ParentID         string    `json:"parentId"`
-	AgentID          string    `json:"agentId"`
-	ParentPath       string    `json:"parentPath"`
-	Path             string    `json:"path"`
-	Title            string    `json:"title"`
-	Instructions     string    `json:"instructions"`
-	Status           string    `json:"status"`
-	Summary          string    `json:"summary,omitempty"`
-	ResultCommit     string    `json:"resultCommit,omitempty"`
-	IntegratedCommit string    `json:"integratedCommit,omitempty"`
-	CreatedAt        time.Time `json:"createdAt"`
-	UpdatedAt        time.Time `json:"updatedAt"`
+	LaunchPending    bool                  `json:"launchPending,omitempty"`
+	PlanID           string                `json:"planId,omitempty"`
+	PlanItemID       string                `json:"planItemId,omitempty"`
+	Issue            *linear.WorktreeIssue `json:"issue,omitempty"`
+	ParentBranch     string                `json:"parentBranch"`
+	ID               string                `json:"id"`
+	ProjectID        string                `json:"projectId"`
+	ParentID         string                `json:"parentId"`
+	AgentID          string                `json:"agentId"`
+	ParentPath       string                `json:"parentPath"`
+	Path             string                `json:"path"`
+	Title            string                `json:"title"`
+	Instructions     string                `json:"instructions"`
+	Status           string                `json:"status"`
+	Summary          string                `json:"summary,omitempty"`
+	ResultCommit     string                `json:"resultCommit,omitempty"`
+	IntegratedCommit string                `json:"integratedCommit,omitempty"`
+	CreatedAt        time.Time             `json:"createdAt"`
+	UpdatedAt        time.Time             `json:"updatedAt"`
 }
 type AgentMessage struct {
 	ID        string     `json:"id"`
@@ -68,6 +74,9 @@ func (m *Manager) Coordination() Coordination {
 }
 func isAgent(t Terminal) bool { return t.Program == "claude" || t.Program == "codex" }
 func (m *Manager) Delegate(v DelegateRequest) (Task, error) {
+	return m.delegate(v, "", "", nil)
+}
+func (m *Manager) delegate(v DelegateRequest, planID, itemID string, issue *linear.WorktreeIssue) (Task, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.cliPath == "" {
@@ -76,6 +85,36 @@ func (m *Manager) Delegate(v DelegateRequest) (Task, error) {
 	parent, err := m.terminal(v.ParentID)
 	if err != nil {
 		return Task{}, err
+	}
+	if parent.Role == "head" && planID == "" {
+		return Task{}, errors.New("head agents propose a plan first; workers start after the user approves it on the canvas")
+	}
+	if planID != "" {
+		for _, existing := range m.state.Tasks {
+			if existing.PlanID == planID && existing.PlanItemID == itemID {
+				if existing.LaunchPending {
+					terminal, e := m.terminal(existing.AgentID)
+					if e != nil {
+						return Task{}, e
+					}
+					if _, e = m.tmux("has-session", "-t", "="+sessionName(terminal.ID)); e != nil {
+						if e = m.start(terminal); e != nil {
+							return Task{}, e
+						}
+					}
+					existing.LaunchPending = false
+					for i := range m.state.Tasks {
+						if m.state.Tasks[i].ID == existing.ID {
+							m.state.Tasks[i] = existing
+						}
+					}
+					if e = m.save(); e != nil {
+						return Task{}, e
+					}
+				}
+				return existing, nil
+			}
+		}
 	}
 	if !isAgent(parent) {
 		return Task{}, errors.New("choose a Claude or Codex parent agent")
@@ -95,12 +134,12 @@ func (m *Manager) Delegate(v DelegateRequest) (Task, error) {
 	if err != nil {
 		return Task{}, errors.New("check out a branch in the parent before delegating")
 	}
-	tree, err := m.createWorktreeLocked(parent.ProjectID, v.Name, "HEAD", nil, parent.Path)
+	tree, err := m.createWorktreeLocked(parent.ProjectID, v.Name, "HEAD", issue, parent.Path)
 	if err != nil {
 		return Task{}, err
 	}
 	now := time.Now().UTC()
-	task := Task{ParentBranch: parentBranch, ID: id(), ProjectID: parent.ProjectID, ParentID: parent.ID, ParentPath: parent.Path, Path: tree.Path, Title: v.Title, Instructions: v.Instructions, Status: "working", CreatedAt: now, UpdatedAt: now}
+	task := Task{LaunchPending: true, PlanID: planID, PlanItemID: itemID, Issue: issue, ParentBranch: parentBranch, ID: id(), ProjectID: parent.ProjectID, ParentID: parent.ID, ParentPath: parent.Path, Path: tree.Path, Title: v.Title, Instructions: v.Instructions, Status: "working", CreatedAt: now, UpdatedAt: now}
 	terminal := Terminal{ID: id(), Program: v.Program, ProjectID: parent.ProjectID, Path: tree.Path, Name: v.Title, TaskID: task.ID, CreatedAt: now, Status: "running"}
 	task.AgentID = terminal.ID
 	oldTasks, oldTerminals := m.state.Tasks, m.state.Terminals
@@ -119,6 +158,7 @@ func (m *Manager) Delegate(v DelegateRequest) (Task, error) {
 		delete(m.state.AgentTokens, terminal.ID)
 		if _, clean := git(parent.Path, "worktree", "remove", "--", tree.Path); clean == nil {
 			delete(m.state.WorktreeLinks, tree.Path)
+			delete(m.state.WorktreeIssues, tree.Path)
 			git(parent.Path, "branch", "-d", "--", v.Name)
 		}
 		m.save()
@@ -132,10 +172,19 @@ func (m *Manager) Delegate(v DelegateRequest) (Task, error) {
 		rollback()
 		return Task{}, err
 	}
+	task.LaunchPending = false
+	for i := range m.state.Tasks {
+		if m.state.Tasks[i].ID == task.ID {
+			m.state.Tasks[i] = task
+		}
+	}
+	if err := m.save(); err != nil {
+		return Task{}, err
+	}
 	return task, nil
 }
 func (m *Manager) taskPrompt(t Task) string {
-	return fmt.Sprintf("You are working in an isolated child worktree on task %s: %s\n\n%s\n\nParent agent: %s. Current task status: %s.\nCoordination CLI: %s\nRun the CLI with help to see its commands. Use inbox regularly, send parent <message> to ask questions or report progress, and wait 60 when waiting for a reply. Messages are persistent; acknowledge handled messages with ack <message-id>. Other agents will only receive messages when they check their inbox.\nWork only in this checkout. Commit your changes and run checks before reporting status done <summary including tests>. Do not merge into the parent. If blocked, report status waiting <question> and check for replies. If this task is already done or canceled, read task and inbox before acting; do not repeat completed work. You can delegate a smaller task with delegate <branch-name> <claude|codex> <title> <instructions>.\n", t.ID, t.Title, t.Instructions, t.ParentID, t.Status, shellQuote(m.cliPath))
+	return fmt.Sprintf("You are working in an isolated child worktree on task %s: %s\n\n%s\n\nParent agent: %s. Current task status: %s.\nCoordination CLI: %s\nRun the CLI with help to see its commands. Use inbox regularly, send parent <message> to ask questions or report progress, and wait 60 when waiting for a reply. Messages are persistent; acknowledge handled messages with ack <message-id>. Other agents will only receive messages when they check their inbox.\nWork only in this checkout. Commit your changes and run checks before reporting status done <summary including tests>. Do not merge into the parent. If blocked, report status waiting <question> and check for replies. After receiving an answer, acknowledge it and report status working before resuming. If this task is already done or canceled, read task and inbox before acting; do not repeat completed work. You can delegate a smaller task with delegate <branch-name> <claude|codex> <title> <instructions>.\n", t.ID, t.Title, t.Instructions, t.ParentID, t.Status, shellQuote(m.cliPath))
 }
 func (m *Manager) SendCoordinationMessage(from, to, taskID, text string) (AgentMessage, error) {
 	m.mu.Lock()
@@ -149,7 +198,7 @@ func (m *Manager) SendCoordinationMessage(from, to, taskID, text string) (AgentM
 			return AgentMessage{}, errors.New("sender agent not found")
 		}
 	}
-	if t, e := m.terminal(to); e != nil || !isAgent(t) {
+	if t, e := m.terminal(to); to != "user" && (e != nil || !isAgent(t)) {
 		return AgentMessage{}, errors.New("recipient agent not found")
 	}
 	if taskID != "" {

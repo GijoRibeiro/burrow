@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"github.com/gijo/cloovies/internal/linear"
 	"net/http"
 	"net/url"
 	"os"
@@ -129,6 +130,8 @@ func (m *Manager) coordinationRoutes(mux *http.ServeMux) {
 }
 
 type AgentAction struct {
+	Query     string           `json:"query,omitempty"`
+	Plan      *PlanRequest     `json:"plan,omitempty"`
 	Action    string           `json:"action"`
 	To        string           `json:"to,omitempty"`
 	Text      string           `json:"text,omitempty"`
@@ -152,6 +155,40 @@ func (m *Manager) agentAction(w http.ResponseWriter, r *http.Request) {
 		v.TaskID = actor.TaskID
 	}
 	switch v.Action {
+	case "linear":
+		key, e := m.linearKey()
+		if e != nil {
+			respond(w, nil, e)
+			return
+		}
+		rows, e := linear.SearchWorktreeIssues(key, v.Query)
+		respond(w, rows, e)
+	case "issue":
+		key, e := m.linearKey()
+		if e != nil {
+			respond(w, nil, e)
+			return
+		}
+		row, e := linear.GetWorktreeIssue(key, v.Query)
+		respond(w, row, e)
+	case "plans":
+		m.mu.Lock()
+		rows := []TeamPlan{}
+		for _, p := range clonePlans(m.state.Plans) {
+			if p.HeadID == actor.ID {
+				rows = append(rows, p)
+			}
+		}
+		m.mu.Unlock()
+		respond(w, rows, nil)
+	case "propose":
+		if v.Plan == nil {
+			respond(w, nil, errors.New("provide a plan"))
+			return
+		}
+		plan, e := m.ProposePlan(actor.ID, *v.Plan)
+		respond(w, plan, e)
+
 	case "inbox":
 		respond(w, m.Inbox(actor.ID), nil)
 	case "ack":

@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -54,7 +55,16 @@ func (m *Manager) start(t Terminal) error {
 	} else {
 		args = append(args, shell)
 	}
-	if t.TaskID != "" && (t.Program == "claude" || t.Program == "codex") {
+	if t.Role == "head" {
+		// Keep coordination mechanics out of the visible opening user message.
+		if t.Program == "claude" {
+			args = append(args, "--append-system-prompt", m.headPrompt(t))
+		} else {
+			instructions, _ := json.Marshal(m.headPrompt(t))
+			args = append(args, "--config", "developer_instructions="+string(instructions))
+		}
+		args = append(args, "--", t.Goal)
+	} else if t.TaskID != "" && (t.Program == "claude" || t.Program == "codex") {
 		if task, err := m.task(t.TaskID); err == nil {
 			args = append(args, m.taskPrompt(task))
 		}
@@ -74,11 +84,17 @@ func (m *Manager) CreateTerminal(projectID, path, name string) (Terminal, error)
 	return m.CreateProgramTerminal(projectID, path, name, "")
 }
 func (m *Manager) CreateProgramTerminal(projectID, path, name, program string) (Terminal, error) {
+	return m.createProgramTerminal(projectID, path, name, program, "", "")
+}
+func (m *Manager) createProgramTerminal(projectID, path, name, program, role, goal string) (Terminal, error) {
 	if program != "" && program != "shell" && program != "claude" && program != "codex" {
 		return Terminal{}, errors.New("choose Claude Code, Codex, or Shell")
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if role == "head" && m.cliPath == "" {
+		return Terminal{}, errors.New("head agents require the standalone workspace server")
+	}
 	p, err := m.project(projectID)
 	if err != nil {
 		return Terminal{}, err
@@ -107,21 +123,24 @@ func (m *Manager) CreateProgramTerminal(projectID, path, name, program string) (
 	if name == "" {
 		name = "Terminal"
 	}
-	t := Terminal{Program: program, ID: id(), ProjectID: projectID, Path: path, Name: name, CreatedAt: time.Now().UTC(), Status: "running"}
+	t := Terminal{Role: role, Goal: goal, Program: program, ID: id(), ProjectID: projectID, Path: path, Name: name, CreatedAt: time.Now().UTC(), Status: "running"}
 	if isAgent(t) {
 		if m.state.AgentTokens == nil {
 			m.state.AgentTokens = map[string]string{}
 		}
 		m.state.AgentTokens[t.ID] = id() + id()
 	}
-	if err = m.start(t); err != nil {
-		delete(m.state.AgentTokens, t.ID)
-		return Terminal{}, err
-	}
+	// Publish identity before launch: a head's first CLI call can be immediate.
 	m.state.Terminals = append(m.state.Terminals, t)
 	if err = m.save(); err != nil {
 		m.state.Terminals = m.state.Terminals[:len(m.state.Terminals)-1]
-		m.tmux("kill-session", "-t", "="+sessionName(t.ID))
+		delete(m.state.AgentTokens, t.ID)
+		return Terminal{}, err
+	}
+	if err = m.start(t); err != nil {
+		m.state.Terminals = m.state.Terminals[:len(m.state.Terminals)-1]
+		delete(m.state.AgentTokens, t.ID)
+		m.save()
 		return Terminal{}, err
 	}
 	return t, nil

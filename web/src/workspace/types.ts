@@ -23,6 +23,8 @@ export interface Project {
   error?: string;
 }
 export interface Session {
+  role?: "head";
+  goal?: string;
   taskId?: string;
   program?: "shell" | "claude" | "codex";
   id: string;
@@ -33,6 +35,7 @@ export interface Session {
   status: "running" | "stopped" | "exited";
 }
 export interface Workspace {
+  plans?: TeamPlan[];
   tasks?: AgentTask[];
   version: number;
   projects: Project[];
@@ -41,6 +44,9 @@ export interface Workspace {
 }
 
 export interface AgentTask {
+  planId?: string;
+  planItemId?: string;
+  issue?: LinearIssue;
   id: string;
   projectId: string;
   parentId: string;
@@ -69,4 +75,25 @@ export interface Coordination {
   tasks: AgentTask[];
   messages: AgentMessage[];
   cli: string;
+}
+
+export interface TeamItem {
+  id: string;
+  name: string;
+  title: string;
+  program: "claude" | "codex";
+  instructions: string;
+  issue?: LinearIssue;
+  taskId?: string;
+  error?: string;
+}
+export interface TeamPlan {
+  id: string;
+  headId: string;
+  title: string;
+  summary: string;
+  status: "proposed" | "launching" | "active" | "partial" | "canceled";
+  items: TeamItem[];
+  createdAt: string;
+  approvedAt?: string;
 }
