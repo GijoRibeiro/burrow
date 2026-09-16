@@ -126,7 +126,7 @@ export function setupDialog(): void {
           );
       }
       note.textContent = value.ready
-        ? "Ready. Add a Git project, create a terminal, and choose Claude, Codex, or a shell. Agents use your own accounts and start in YOLO mode with broad access to your files and commands."
+        ? "Ready. Add a project, create a terminal, and choose Claude, Codex, or a shell. Agents use your own accounts and start in YOLO mode with broad access to your files and commands."
         : "Setup installs Homebrew if needed, then Git and tmux. The app is already bundled. Homebrew may also install Apple’s Command Line Tools.";
     } catch (err) {
       error.textContent = err instanceof Error ? err.message : String(err);

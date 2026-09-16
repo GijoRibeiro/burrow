@@ -111,18 +111,21 @@ func (m *Manager) createProgramTerminal(projectID, path, name, program, role, go
 	if err != nil {
 		return Terminal{}, err
 	}
+	if info, e := os.Stat(path); e != nil || !info.IsDir() {
+		return Terminal{}, errors.New("choose an existing folder for the agent")
+	}
 	trees, _, err := projectCheckouts(p.Path)
 	if err != nil {
 		return Terminal{}, err
 	}
 	found := false
 	for _, w := range trees {
-		if w.Path == path {
+		if w.Path == path || (role != "head" && folderWithin(path, w.Path)) {
 			found = true
 		}
 	}
 	if !found {
-		return Terminal{}, errors.New("terminal folder must be the project folder or one of its worktrees")
+		return Terminal{}, errors.New("terminal folder must be inside the project or one of its worktrees")
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {

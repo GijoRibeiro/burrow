@@ -141,7 +141,7 @@ final class WorkspaceApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
             replyHandler(nil, nil); return
         }
         if message.name == "installTools" {
-            guard let tool = message.body as? String, ["required", "claude", "codex"].contains(tool), let script = Bundle.main.url(forResource: "install", withExtension: "command", subdirectory: "Setup") else { replyHandler(nil, "Unknown setup option"); return }
+            guard let tool = message.body as? String, ["required", "claude", "codex", "github"].contains(tool), let script = Bundle.main.url(forResource: "install", withExtension: "command", subdirectory: "Setup") else { replyHandler(nil, "Unknown setup option"); return }
             // A .command file opens its own Terminal session without Apple Events permission.
             let shellCommand = "/bin/bash '" + script.path.replacingOccurrences(of: "'", with: "'\"'\"'") + "' " + tool
             let wrapper = FileManager.default.temporaryDirectory.appendingPathComponent("cloovies-setup-" + UUID().uuidString + ".command")

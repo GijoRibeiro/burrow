@@ -37,6 +37,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer m.CloseClones()
 	if err := m.ConfigureAgentRuntime(fmt.Sprintf("http://127.0.0.1:%d", *port)); err != nil {
 		log.Fatal(err)
 	}

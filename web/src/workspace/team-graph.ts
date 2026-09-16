@@ -1,4 +1,5 @@
 import { button, el } from "./dom";
+import { contextMenu } from "./context-menu";
 import { creature } from "./creature";
 import type {
   Workspace,
@@ -16,6 +17,7 @@ export interface TeamGraphContext {
   select(id: string): void;
   menu(id: string, x: number, y: number, restore: () => void): void;
   newHead(): void;
+  newAgent(position?: { x: number; y: number }): void;
   review(plan: TeamPlan): void;
   task(id: string): void;
 }
@@ -150,10 +152,11 @@ export class TeamGraph {
     };
     actions.append(
       this.teamSelect,
+      button("New agent", () => ctx.newAgent(), "primary", "+ Agent"),
       button(
         "Start a head agent",
         () => ctx.newHead(),
-        "primary",
+        "secondary",
         "+ Head agent",
       ),
     );
@@ -248,7 +251,46 @@ export class TeamGraph {
       this.space = false;
     });
     this.surface.addEventListener("pointerdown", (e) => this.startDrag(e));
+    const openMenu = (x: number, y: number) => {
+      const bounds = this.surface.getBoundingClientRect();
+      const position = {
+        x: (x - bounds.left - this.viewport.x) / this.viewport.scale,
+        y: (y - bounds.top - this.viewport.y) / this.viewport.scale,
+      };
+      contextMenu(
+        "Canvas",
+        x,
+        y,
+        [
+          { label: "New agent…", run: () => ctx.newAgent(position) },
+          { label: "New head agent…", run: () => ctx.newHead() },
+        ],
+        () => this.surface.focus({ preventScroll: true }),
+        "var(--ink)",
+      );
+    };
+    this.surface.addEventListener("contextmenu", (e) => {
+      if ((e.target as HTMLElement).closest(".team-node")) return;
+      e.preventDefault();
+      openMenu(e.clientX, e.clientY);
+    });
+    this.surface.addEventListener("keydown", (e) => {
+      if (
+        e.target === this.surface &&
+        (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10"))
+      ) {
+        e.preventDefault();
+        const b = this.surface.getBoundingClientRect();
+        openMenu(b.left + b.width / 2, b.top + b.height / 2);
+      }
+    });
     this.transform();
+  }
+  place(id: string, position: { x: number; y: number }): void {
+    this.positions[id] = position;
+    this.manual.add(id);
+    this.position();
+    this.save();
   }
   update(selected: string): void {
     this.selected = selected;
@@ -325,17 +367,23 @@ export class TeamGraph {
         pets.append(creature(name));
       empty.append(
         pets,
-        el("h3", "", "Give your day a head start."),
+        el("h3", "", "Make room for a companion."),
         el(
           "p",
           "",
-          "Ask a head agent to look at your Linear tickets. Discuss the plan, then watch your team branch out.",
+          "Start an agent in any folder, or ask a head to build a team for your tickets.",
+        ),
+        button(
+          "Create your first agent",
+          () => this.ctx.newAgent(),
+          "primary",
+          "+ New agent",
         ),
         button(
           "Create your first head agent",
           () => this.ctx.newHead(),
-          "primary",
-          "Let's build a team",
+          "secondary",
+          "Start a head agent",
         ),
       );
       this.cards.append(empty);

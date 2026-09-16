@@ -2217,14 +2217,12 @@ test("ordinary folders support agents and discover Git when it is added later", 
     .getByRole("button", { name: "Add project", exact: true })
     .click();
   await expect(dialog).toHaveCount(0);
-  const group = page
-    .locator(".project-group")
-    .filter({
-      has: page.getByRole("button", {
-        name: "Toggle Plain project",
-        exact: true,
-      }),
-    });
+  const group = page.locator(".project-group").filter({
+    has: page.getByRole("button", {
+      name: "Toggle Plain project",
+      exact: true,
+    }),
+  });
   await expect(group.locator(".main-badge")).toHaveCount(0);
   await expect(group.locator(".project-error")).toHaveCount(0);
   await expect(
@@ -2320,5 +2318,329 @@ test("ordinary folders support agents and discover Git when it is added later", 
   expect(state.projects.find((p: any) => p.id === project.id).git).toBe(true);
   expect(
     tmux("display-message", "-p", "-t", `=cw-${agent.id}:`, "#{pane_pid}"),
+  ).toBe(pid);
+});
+
+async function repositoryPicker(page: Page) {
+  await page
+    .getByRole("button", { name: "Add project", exact: true })
+    .first()
+    .click();
+  const dialog = page.getByRole("dialog", { name: "Add a project" });
+  await dialog
+    .getByRole("button", { name: "GitHub repository", exact: true })
+    .click();
+  return dialog;
+}
+test("GitHub picker searches all repositories, chooses a folder and opens a real clone", async ({
+  page,
+}, info) => {
+  await page.goto("/");
+  const dialog = await repositoryPicker(page);
+  await expect(
+    dialog.getByText("GitHub · fixture-user", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByRole("button", { name: /^Select repository / }),
+  ).toHaveCount(50);
+  await dialog.getByRole("button", { name: "Show more repositories" }).click();
+  await expect(
+    dialog.getByRole("button", { name: /^Select repository / }),
+  ).toHaveCount(67);
+  await dialog
+    .getByLabel("Search GitHub repositories")
+    .fill("https://github.com/team/burrow.git");
+  await expect(
+    dialog.getByRole("button", { name: /^Select repository / }),
+  ).toHaveCount(1);
+  await dialog
+    .getByRole("button", { name: "Select repository team/burrow", exact: true })
+    .click();
+  await expect(dialog.getByLabel("Folder name", { exact: true })).toHaveValue(
+    "burrow",
+  );
+  const root = process.env.CLOOVIES_E2E_ROOT!;
+  await dialog.getByLabel("Clone into", { exact: true }).fill(root);
+  await dialog
+    .getByLabel("Folder name", { exact: true })
+    .fill("My GitHub project");
+  await expect(dialog.locator(".repo-destination")).toContainText(
+    join(root, "My GitHub project"),
+  );
+  await dialog.screenshot({ path: info.outputPath("github-picker.png") });
+  await dialog.getByRole("button", { name: "Clone and open" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(
+    page.getByRole("button", { name: "Toggle My GitHub project", exact: true }),
+  ).toBeVisible();
+  const state = await (await page.request.get("/api/workspace")).json();
+  const project = state.projects.find(
+    (p: any) => p.name === "My GitHub project",
+  );
+  expect(project.git).toBe(true);
+  expect(
+    execFileSync("git", ["-C", project.path, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim(),
+  ).toMatch(/^[a-f0-9]{40}$/);
+  await page
+    .getByRole("button", {
+      name: "New terminal in My GitHub project My GitHub project",
+      exact: true,
+    })
+    .click();
+  const terminal = page.getByRole("dialog");
+  await terminal
+    .getByLabel("Terminal name", { exact: true })
+    .fill("Cloned shell");
+  await terminal.getByLabel("Run", { exact: true }).selectOption("shell");
+  await terminal
+    .getByRole("button", { name: "Start terminal", exact: true })
+    .click();
+  await expect(terminal).toBeHidden();
+  const updated = await (await page.request.get("/api/workspace")).json();
+  const agent = updated.terminals.find((t: any) => t.name === "Cloned shell");
+  expect(
+    tmux(
+      "display-message",
+      "-p",
+      "-t",
+      `=cw-${agent.id}:`,
+      "#{pane_current_path}",
+    ).trim(),
+  ).toBe(project.path);
+});
+test("GitHub cloning refuses existing folders, cancels, recovers after reload and retries", async ({
+  page,
+}) => {
+  await page.goto("/");
+  let dialog = await repositoryPicker(page);
+  await expect(dialog.getByLabel("Search GitHub repositories")).toBeEnabled();
+  await dialog.getByLabel("Search GitHub repositories").fill("team/slow");
+  await dialog
+    .getByRole("button", { name: "Select repository team/slow", exact: true })
+    .click();
+  const root = process.env.CLOOVIES_E2E_ROOT!;
+  await dialog.getByLabel("Clone into", { exact: true }).fill(root);
+  await dialog.getByLabel("Folder name", { exact: true }).fill("Checkout");
+  await dialog.getByRole("button", { name: "Clone and open" }).click();
+  await expect(dialog.getByRole("alert")).toContainText("already exists");
+  await dialog
+    .getByLabel("Folder name", { exact: true })
+    .fill("canceled-clone");
+  await dialog.getByRole("button", { name: "Clone and open" }).click();
+  await expect(dialog.locator(".repo-progress")).toContainText(
+    "Receiving objects: 12%",
+  );
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Add project", exact: true })
+    .first()
+    .click();
+  dialog = page.getByRole("dialog", { name: "Add a project" });
+  await expect(dialog.locator(".repo-progress")).toContainText(
+    "Receiving objects: 12%",
+  );
+  await dialog
+    .getByRole("button", { name: "Cancel clone", exact: true })
+    .click();
+  await expect(dialog.locator(".repo-progress")).toContainText(
+    "Clone canceled",
+  );
+  await expect.poll(() => existsSync(join(root, "canceled-clone"))).toBe(false);
+  await expect(dialog.getByLabel("Search GitHub repositories")).toBeEnabled();
+  await dialog.getByLabel("Search GitHub repositories").fill("team/burrow");
+  await dialog
+    .getByRole("button", { name: "Select repository team/burrow", exact: true })
+    .click();
+  await dialog.getByLabel("Clone into", { exact: true }).fill(root);
+  await dialog
+    .getByLabel("Folder name", { exact: true })
+    .fill("canceled-clone");
+  await dialog.getByRole("button", { name: "Clone and open" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(
+    page.getByRole("button", { name: "Toggle canceled-clone", exact: true }),
+  ).toBeVisible();
+});
+test("GitHub connection offers native setup and expired clones stop loading", async ({
+  page,
+}) => {
+  let connected = false;
+  await page.route("**/api/workspace/github", (route) =>
+    route.fulfill({
+      json: {
+        installed: connected,
+        connected,
+        login: connected ? "fixture-user" : undefined,
+        folder: process.env.CLOOVIES_E2E_ROOT,
+      },
+    }),
+  );
+  await page.exposeFunction("githubSetup", (value: string) => {
+    expect(value).toBe("github");
+    connected = true;
+    return "opened";
+  });
+  await page.addInitScript(() => {
+    (window as any).webkit = {
+      messageHandlers: {
+        installTools: {
+          postMessage: (value: string) => (window as any).githubSetup(value),
+        },
+      },
+    };
+  });
+  await page.goto("/");
+  const dialog = await repositoryPicker(page);
+  await dialog
+    .getByRole("button", { name: "Connect GitHub", exact: true })
+    .click();
+  await expect(
+    dialog.getByText("GitHub · fixture-user", { exact: true }),
+  ).toBeVisible({ timeout: 15_000 });
+  await dialog.getByLabel("Search GitHub repositories").fill("team/burrow");
+  await dialog
+    .getByRole("button", { name: "Select repository team/burrow", exact: true })
+    .click();
+  await page.route("**/api/workspace/github/clones", (route) =>
+    route.fulfill({
+      json: {
+        id: "expired",
+        repository: "team/burrow",
+        path: "/tmp/fixture",
+        status: "cloning",
+        progress: "Connecting…",
+      },
+    }),
+  );
+  await dialog
+    .getByRole("button", { name: "Clone and open", exact: true })
+    .click();
+  await expect(dialog.getByRole("alert")).toContainText(
+    "clone is no longer active",
+  );
+  await expect(
+    dialog.getByRole("button", { name: "Clone and open", exact: true }),
+  ).toBeEnabled();
+  expect(
+    await page.evaluate(() => localStorage.getItem("burrow.project-clone.v1")),
+  ).toBeNull();
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(dialog).toBeHidden();
+});
+
+test("canvas creates agents directly in existing projects and arbitrary folders", async ({
+  page,
+}, info) => {
+  const root = process.env.CLOOVIES_E2E_ROOT!;
+  const subfolder = join(root, "Checkout", "frontend");
+  mkdirSync(subfolder, { recursive: true });
+  await page.addInitScript((folder) => {
+    (window as any).webkit = {
+      messageHandlers: { chooseFolder: { postMessage: async () => folder } },
+    };
+  }, subfolder);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Team canvas", exact: true }).click();
+  await page.getByRole("button", { name: "New agent", exact: true }).click();
+  let dialog = page.getByRole("dialog", { name: "New agent", exact: true });
+  await dialog.getByLabel("Agent location", { exact: true }).selectOption("");
+  await dialog.getByRole("button", { name: "Browse for agent folder" }).click();
+  await expect(dialog.getByLabel("Agent folder", { exact: true })).toHaveValue(
+    subfolder,
+  );
+  await dialog
+    .getByLabel("Agent name (optional)", { exact: true })
+    .fill("UI companion");
+  await dialog.screenshot({ path: info.outputPath("new-agent.png") });
+  await dialog
+    .getByRole("button", { name: "Start agent", exact: true })
+    .click();
+  await expect(dialog).toBeHidden();
+  let state = await (await page.request.get("/api/workspace")).json();
+  const first = state.terminals.find((t: any) => t.name === "UI companion");
+  await expect(page.locator(`[data-node-id="${first.id}"]`)).toBeVisible();
+  expect(first.path).toContain("Checkout/frontend");
+  expect(
+    tmux(
+      "display-message",
+      "-p",
+      "-t",
+      `=cw-${first.id}:`,
+      "#{pane_current_path}",
+    ).trim(),
+  ).toBe(first.path);
+  const pid = tmux(
+    "display-message",
+    "-p",
+    "-t",
+    `=cw-${first.id}:`,
+    "#{pane_pid}",
+  );
+  const pane = page.getByRole("region", {
+    name: "UI companion terminal",
+    exact: true,
+  });
+  await expect(
+    pane.getByRole("button", { name: "Send message", exact: true }),
+  ).toBeEnabled();
+  await send(page, "UI companion", "Hello from the canvas");
+  await expect(pane.locator(".conversation-message.assistant")).toContainText(
+    "Hello from the canvas",
+  );
+  await page.locator(`[data-node-id="${first.id}"]`).click({ button: "right" });
+  await page
+    .getByRole("menuitem", { name: "New agent in this folder…", exact: true })
+    .click();
+  dialog = page.getByRole("dialog", { name: "New agent", exact: true });
+  await expect(dialog.getByLabel("Agent folder", { exact: true })).toHaveValue(
+    first.path,
+  );
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await page
+    .locator(".team-surface")
+    .click({ button: "right", position: { x: 8, y: 8 } });
+  await page.getByRole("menuitem", { name: "New agent…", exact: true }).click();
+  dialog = page.getByRole("dialog", { name: "New agent", exact: true });
+  await dialog.getByRole("button", { name: "Codex", exact: true }).click();
+  await dialog.getByLabel("Agent location", { exact: true }).selectOption("");
+  const plain = join(root, "Canvas folder");
+  mkdirSync(plain, { recursive: true });
+  await dialog.getByLabel("Agent folder", { exact: true }).fill(plain);
+  await dialog
+    .getByLabel("Agent name (optional)", { exact: true })
+    .fill("Second companion");
+  await dialog
+    .getByRole("button", { name: "Start agent", exact: true })
+    .click();
+  await expect(dialog).toBeHidden();
+  state = await (await page.request.get("/api/workspace")).json();
+  const second = state.terminals.find(
+    (t: any) => t.name === "Second companion",
+  );
+  expect(second.program).toBe("codex");
+  expect(state.projects.find((p: any) => p.id === second.projectId).git).toBe(
+    false,
+  );
+  expect(existsSync(join(plain, ".git"))).toBe(false);
+  await expect(page.locator(`[data-node-id="${first.id}"]`)).toBeVisible();
+  await expect(page.locator(`[data-node-id="${second.id}"]`)).toBeVisible();
+  await page.reload();
+  await expect(page.locator(`[data-node-id="${second.id}"]`)).toBeVisible();
+  await page
+    .getByRole("button", {
+      name: "Open selected agent in terminals",
+      exact: true,
+    })
+    .click();
+  await expect(
+    page.getByRole("region", {
+      name: "Second companion terminal",
+      exact: true,
+    }),
+  ).toBeVisible();
+  expect(
+    tmux("display-message", "-p", "-t", `=cw-${first.id}:`, "#{pane_pid}"),
   ).toBe(pid);
 });

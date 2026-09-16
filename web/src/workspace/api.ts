@@ -1,3 +1,11 @@
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+  ) {
+    super(message);
+  }
+}
 export async function api<T>(
   path = "",
   method = "GET",
@@ -17,6 +25,9 @@ export async function api<T>(
     throw new Error(text || `Server returned ${response.status}`);
   }
   if (!response.ok)
-    throw new Error(data.error || `Server returned ${response.status}`);
+    throw new ApiError(
+      data.error || `Server returned ${response.status}`,
+      response.status,
+    );
   return data as T;
 }

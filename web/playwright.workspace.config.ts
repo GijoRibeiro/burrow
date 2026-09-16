@@ -38,6 +38,8 @@ copyFileSync("e2e/fixtures/claude.cjs", join(testBin, "claude"));
 chmodSync(join(testBin, "claude"), 0o755);
 copyFileSync("e2e/fixtures/codex.cjs", join(testBin, "codex"));
 chmodSync(join(testBin, "codex"), 0o755);
+copyFileSync("e2e/fixtures/gh.cjs", join(testBin, "gh"));
+chmodSync(join(testBin, "gh"), 0o755);
 export default defineConfig({
   testDir: "./e2e",
   testMatch: "workspace.spec.ts",
@@ -57,6 +59,7 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 90_000,
     env: {
+      CLOOVIES_E2E_ROOT: root,
       CLOOVIES_WORKSPACE_DIR: join(root, "state"),
       CLOOVIES_TMUX_SOCKET: socket,
       SHELL: "/bin/sh",

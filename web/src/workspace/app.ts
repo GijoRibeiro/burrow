@@ -1,3 +1,5 @@
+import { projectDialog } from "./project-dialog";
+import { agentDialog } from "./agent-dialog";
 import { contextMenu, type MenuAction } from "./context-menu";
 import { TeamGraph } from "./team-graph";
 import { newHeadDialog, reviewTeamPlan, linearConnectionDialog } from "./teams";
@@ -97,6 +99,12 @@ class WorkspaceApp {
       creature: (id) => this.appearances[id]?.creature || defaultCreature(id),
       select: (id) => this.selectTeamAgent(id),
       newHead: () => this.newHead(),
+      newAgent: (position) =>
+        this.newAgent(
+          this.state.terminals.find((agent) => agent.id === this.teamSelected)
+            ?.path || this.selectedPath,
+          position,
+        ),
       menu: (id, x, y, restore) => this.agentMenu(id, x, y, restore),
       review: (plan) => this.reviewPlan(plan),
       task: (id) => coordinationDialog(this.coordinationContext(), id),
@@ -784,30 +792,17 @@ class WorkspaceApp {
     this.persist();
   }
   private addProject(): void {
-    dialog(
-      "Add a project",
-      "Choose any local folder for your terminals and agents. Git repositories also show their worktrees.",
-      [
-        {
-          name: "path",
-          label: "Project folder",
-          placeholder: "/Users/you/Code/checkout",
-        },
-        {
-          name: "name",
-          label: "Display name (optional)",
-          placeholder: "Use folder name",
-          required: false,
-        },
-      ],
-      "Add project",
-      async (values) => {
-        const p = await this.mutate<Project>("/projects", "POST", values);
-        this.selectedProject = p.id;
-        this.selectedPath = p.path;
-        this.renderSidebar();
-      },
-    );
+    projectDialog(async (project) => {
+      await this.reloadState();
+      this.selectedProject = project.id;
+      this.selectedPath = project.path;
+      this.onlyActive = false;
+      this.activeFilter.setAttribute("aria-pressed", "false");
+      this.search.value = "";
+      this.collapsed.delete(project.id);
+      this.renderSidebar();
+      this.persist();
+    });
   }
   private coordinationContext(): CoordinationContext {
     return {
@@ -882,6 +877,10 @@ class WorkspaceApp {
     const actions: MenuAction[] = [
       { label: "Open conversation", run: () => this.selectTeamAgent(id) },
       { label: "Open in terminals", run: () => this.openInTerminals(id) },
+      {
+        label: "New agent in this folder…",
+        run: () => this.newAgent(agent.path),
+      },
       { label: "Rename agent…", run: () => this.rename(id) },
       {
         label: "Tasks and inbox…",
@@ -1057,6 +1056,25 @@ class WorkspaceApp {
     );
   }
 
+  private newAgent(
+    path = this.selectedPath,
+    position?: { x: number; y: number },
+  ): void {
+    agentDialog(this.state, path, async (agent) => {
+      await this.reloadState();
+      this.selectedProject = agent.projectId;
+      this.selectedPath = agent.path;
+      this.collapsed.delete(agent.projectId);
+      this.search.value = "";
+      this.tree = insert(this.tree, agent.id, this.active, "row");
+      this.view = "team";
+      this.selectTeamAgent(agent.id);
+      if (position) this.teamGraph.place(agent.id, position);
+      requestAnimationFrame(() => this.teamGraph.fit());
+      this.renderSidebar();
+      this.persist();
+    });
+  }
   private newTerminal(
     projectId = this.selectedProject,
     path = this.selectedPath,

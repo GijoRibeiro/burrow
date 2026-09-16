@@ -28,7 +28,7 @@ Terminal panes are retained while the layout changes, rather than rebuilding the
 
 The legacy dashboard is built separately, so its large style sheet and UI do not load in the workspace. The workspace reuses its sprites, palette, and animation in small independent modules, with readable Google Fonts for text.
 
-This implementation targets macOS and Unix systems with tmux and PTY support. The native build script currently targets Apple Silicon. It is a local, single-user workspace, not a remote multi-user terminal service. The native package is locally ad-hoc signed; notarized public distribution is a separate release step.
+This implementation targets macOS and Unix systems with tmux and PTY support. The native build script produces a universal Apple Silicon and Intel app. It is a local, single-user workspace, not a remote multi-user terminal service. The native package is locally ad-hoc signed; notarized public distribution is a separate release step.
 
 `appearance.ts` allocates distinct colors and least-used randomized creatures, persisted per terminal. A versioned migration repairs inherited duplicate identities. `motion.ts` animates layout changes using saved pane rectangles and short-lived inert exit snapshots; live PTYs are never replaced for animation. Reduced-motion bypasses these effects. Native menu commands and capture-phase browser shortcuts share the same application actions. Text size updates both xterm and Agent reading content.
 
