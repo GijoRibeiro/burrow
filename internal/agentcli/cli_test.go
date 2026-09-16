@@ -52,6 +52,15 @@ func TestCLIUsesAgentCredentialsAndStructuredMessages(t *testing.T) {
 	if received.Delegate == nil || received.Delegate.Program != "codex" {
 		t.Fatalf("wrong delegate: %+v", received)
 	}
+	if err := Run(append(args, "start", "existing-plan"), &out); err != nil {
+		t.Fatal(err)
+	}
+	if received.Action != "start" || received.Query != "existing-plan" {
+		t.Fatalf("wrong start: %+v", received)
+	}
+	if err := Run(append(args, "start"), &out); err == nil {
+		t.Fatal("missing plan accepted")
+	}
 	data, _ = json.Marshal(workspace.AgentRuntime{URL: "https://example.com", StateFile: state})
 	os.WriteFile(runtime, data, 0600)
 	if err := Run(append(args, "inbox"), &out); err == nil {

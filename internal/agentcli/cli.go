@@ -23,6 +23,7 @@ const Help = `burrow — workspace agent coordination (JSON output)
   linear [search]                        Your open Linear tickets, or search
   issue <identifier>                     Read full Linear ticket context
   plans                                  Read your teams and launch status
+  start <plan-id>                        Start or retry your existing team (head only)
   propose <JSON|->                       Create and start workers immediately (head only)
     JSON: {"title":"...","summary":"...","items":[{"issueId":"ENG-1","name":"eng-1","program":"codex","title":"...","instructions":"..."}]}
   send user <message>                    Send an update to the user in Tasks and inbox
@@ -115,6 +116,11 @@ func Run(args []string, out io.Writer) error {
 		if len(args) == 2 {
 			action.Query = args[1]
 		}
+	case "start":
+		if err := need(2); err != nil {
+			return err
+		}
+		action.Query = args[1]
 	case "propose":
 		if err := need(2); err != nil {
 			return err
