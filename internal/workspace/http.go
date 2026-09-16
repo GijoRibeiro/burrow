@@ -32,6 +32,7 @@ func (m *Manager) Handler() http.Handler {
 	m.linearRoutes(mux)
 	m.setupRoutes(mux)
 	m.coordinationRoutes(mux)
+	m.teamRoutes(mux)
 	mux.HandleFunc("GET /api/workspace", func(w http.ResponseWriter, r *http.Request) { respond(w, m.Snapshot(), nil) })
 	mux.HandleFunc("POST /api/workspace/projects", func(w http.ResponseWriter, r *http.Request) {
 		var v struct{ Path, Name string }

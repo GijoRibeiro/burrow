@@ -63,6 +63,13 @@ macOS shortcuts: Cmd+K opens the terminal picker, Cmd+Shift+N creates a terminal
 
 ## Optional teamwork
 
+Start a **Head agent** to discuss your Linear tickets and propose a team. Review
+its plan, then launch one worker and terminal per ticket. **Team canvas** shows
+heads branching into workers; click a creature to talk, or switch to **Terminals**
+to keep your familiar split layout. The head can read worker questions and send
+replies while supervising. Use **Active agents only** for a quieter sidebar.
+
+
 Right-click a checkout to **Create child worktree…**, or right-click an agent to **Delegate task…**. Delegation starts Claude or Codex in an independent child checkout with task context. Use **Tasks and inbox** to read messages, reply, follow status, and review completed changes before explicitly integrating them into the parent. Existing agents can opt in using the panel's connection instructions. Messages are persistent and read when agents check their inbox; ordinary terminals and worktrees continue to work independently.
 
 See [the teamwork guide](docs/COORDINATION.md) for the CLI, integration safeguards, and delivery behavior.

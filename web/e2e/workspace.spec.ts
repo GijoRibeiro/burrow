@@ -1557,11 +1557,9 @@ test("optional child worktrees and agent coordination preserve the terminal canv
     })
   ).json();
   await page.goto("/");
-  const group = page
-    .locator(".project-group")
-    .filter({
-      has: page.getByRole("button", { name: "Toggle Teamwork", exact: true }),
-    });
+  const group = page.locator(".project-group").filter({
+    has: page.getByRole("button", { name: "Toggle Teamwork", exact: true }),
+  });
   await group
     .getByRole("button", { name: "Select Teamwork main", exact: true })
     .click({ button: "right" });
@@ -1711,4 +1709,171 @@ test("optional child worktrees and agent coordination preserve the terminal canv
     snapshot.tasks.find((t: { id: string }) => t.id === task.id)
       .integratedCommit,
   ).toBeTruthy();
+});
+
+test("head proposes a team, waits for review, and coordinates workers on a persistent canvas", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 1050 });
+  const root = process.env.CLOOVIES_E2E_ROOT!;
+  const path = join(root, "Morning team");
+  mkdirSync(path, { recursive: true });
+  execFileSync("git", ["init", "-b", "main", path]);
+  execFileSync("git", [
+    "-C",
+    path,
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@localhost",
+    "commit",
+    "--allow-empty",
+    "-m",
+    "Initial",
+  ]);
+  const project = await (
+    await page.request.post("/api/workspace/projects", {
+      data: { path, name: "Morning team" },
+    })
+  ).json();
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: "Start a head agent", exact: true })
+    .click();
+  const form = page.getByRole("dialog");
+  await form
+    .getByLabel("Project / checkout", { exact: true })
+    .selectOption(JSON.stringify([project.id, project.path]));
+  await form.getByLabel("Head agent", { exact: true }).selectOption("codex");
+  await form.getByLabel("Name", { exact: true }).fill("Morning head");
+  await form.getByRole("button", { name: "Start the conversation" }).click();
+  await expect(page.locator(".team-graph")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Review plan A focused morning" }),
+  ).toBeVisible();
+  let state = await (await page.request.get("/api/workspace")).json();
+  const head = state.terminals.find((t: any) => t.name === "Morning head");
+  expect(
+    state.terminals.filter((t: any) => t.projectId === project.id),
+  ).toHaveLength(1);
+  expect(
+    state.projects.find((p: any) => p.id === project.id).worktrees,
+  ).toHaveLength(1);
+  await expect(page.locator(".team-node.proposed")).toHaveCount(3);
+  await page
+    .getByRole("button", { name: "Review plan A focused morning" })
+    .click();
+  await expect(
+    page.getByRole("dialog", { name: "Review team plan" }),
+  ).toContainText("Three independent tasks");
+  await page.getByRole("button", { name: "Approve and start team" }).click();
+  await expect(
+    page.getByRole("dialog", { name: "Review team plan" }),
+  ).not.toBeVisible();
+  await expect(page.locator(".team-node.proposed")).toHaveCount(0);
+  state = await (await page.request.get("/api/workspace")).json();
+  const plan = state.plans.find((p: any) => p.headId === head.id);
+  const tasks = state.tasks.filter((t: any) => t.planId === plan.id);
+  expect(tasks).toHaveLength(3);
+  expect(
+    state.projects.find((p: any) => p.id === project.id).worktrees,
+  ).toHaveLength(4);
+  // Workers are real fixture processes in independent Git worktrees. The head
+  // reads their durable questions and replies through the actual local CLI.
+  await expect
+    .poll(async () => {
+      const coordination = await (
+        await page.request.get("/api/workspace/coordination")
+      ).json();
+      return coordination.messages.filter(
+        (m: any) => m.from === head.id && m.text.startsWith("Head reply:"),
+      ).length;
+    })
+    .toBeGreaterThanOrEqual(3);
+  // A repeated approval cannot duplicate terminals or worktrees.
+  await page.request.post(`/api/workspace/plans/${plan.id}/approve`, {
+    data: {},
+  });
+  const after = await (await page.request.get("/api/workspace")).json();
+  expect(
+    after.terminals.filter((t: any) => t.projectId === project.id),
+  ).toHaveLength(4);
+  await page.getByRole("button", { name: "Close canvas terminal" }).click();
+  await page.getByRole("button", { name: "Fit team to canvas" }).click();
+  await page.screenshot({ path: join(root, "team-canvas.png") });
+  await page
+    .getByRole("button", { name: "Open Checkout navigation on canvas" })
+    .click();
+  await expect(page.locator(".team-dock")).toContainText("Checkout navigation");
+  await page
+    .getByRole("button", { name: "Open selected agent in terminals" })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Terminals", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    page.getByRole("region", {
+      name: "Checkout navigation terminal",
+      exact: true,
+    }),
+  ).toBeVisible();
+  const layout = await page.evaluate(
+    () =>
+      JSON.parse(localStorage.getItem("cloovies.workspace.layout.v1")!).tree,
+  );
+  await page.getByRole("button", { name: "Team canvas", exact: true }).click();
+  await page.getByRole("button", { name: "Close canvas terminal" }).click();
+  await page.getByRole("button", { name: "Fit team to canvas" }).click();
+  const card = page.getByRole("button", {
+    name: "Open Morning head on canvas",
+  });
+  const box = (await card.boundingBox())!;
+  const oldPosition = await page
+    .locator(`[data-node-id="${head.id}"]`)
+    .evaluate((e) => (e as HTMLElement).style.transform);
+  await page.mouse.move(box.x + 30, box.y + 20);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 75, box.y + 45, { steps: 8 });
+  await page.mouse.up();
+  const movedPosition = await page
+    .locator(`[data-node-id="${head.id}"]`)
+    .evaluate((e) => (e as HTMLElement).style.transform);
+  expect(movedPosition).not.toBe(oldPosition);
+  await page.getByRole("button", { name: "Zoom in canvas" }).click();
+  const viewport = await page.evaluate(
+    () => JSON.parse(localStorage.getItem("burrow.team-canvas.v1")!).viewport,
+  );
+  await page.reload();
+  await expect(
+    page.getByRole("button", { name: "Team canvas", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(`[data-node-id="${head.id}"]`)).toHaveCSS(
+    "transform",
+    /matrix/,
+  );
+  expect(
+    await page.evaluate(
+      () => JSON.parse(localStorage.getItem("burrow.team-canvas.v1")!).viewport,
+    ),
+  ).toEqual(viewport);
+  await page.getByRole("button", { name: "Terminals", exact: true }).click();
+  const restoredLayout = await page.evaluate(
+    () =>
+      JSON.parse(localStorage.getItem("cloovies.workspace.layout.v1")!).tree,
+  );
+  const withoutGeneratedIds = (value: unknown) =>
+    JSON.stringify(value, (key, v) => (key === "id" ? undefined : v));
+  expect(withoutGeneratedIds(restoredLayout)).toBe(withoutGeneratedIds(layout));
+  await page.keyboard.press("Tab");
+  await expect(page.locator(".terminal-pane.focused")).toHaveCount(1);
+  // Sidebar filtering is visual only and survives reload.
+  await page
+    .getByRole("button", { name: "Show only projects with running agents" })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Toggle Morning team", exact: true }),
+  ).toBeVisible();
+  expect(
+    (await (await page.request.get("/api/workspace")).json()).projects.length,
+  ).toBe(after.projects.length);
 });

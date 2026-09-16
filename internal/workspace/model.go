@@ -36,6 +36,8 @@ type Worktree struct {
 	Main       bool                  `json:"main"`
 }
 type Terminal struct {
+	Role      string    `json:"role,omitempty"`
+	Goal      string    `json:"goal,omitempty"`
 	TaskID    string    `json:"taskId,omitempty"`
 	Program   string    `json:"program,omitempty"`
 	ID        string    `json:"id"`
@@ -46,6 +48,7 @@ type Terminal struct {
 	Status    string    `json:"status"`
 }
 type State struct {
+	Plans          []TeamPlan                      `json:"plans,omitempty"`
 	WorktreeLinks  map[string]WorktreeLink         `json:"worktreeLinks,omitempty"`
 	Tasks          []Task                          `json:"tasks,omitempty"`
 	Messages       []AgentMessage                  `json:"messages,omitempty"`
@@ -57,6 +60,7 @@ type State struct {
 	TmuxAvailable  bool                            `json:"tmuxAvailable"`
 }
 type Manager struct {
+	planMu     sync.Mutex
 	runtimeURL string
 	cliPath    string
 	mu         sync.Mutex
@@ -186,6 +190,7 @@ func (m *Manager) project(id string) (Project, error) {
 func (m *Manager) Snapshot() State {
 	m.mu.Lock()
 	s := m.state
+	s.Plans = clonePlans(m.state.Plans)
 	s.AgentTokens = nil
 	s.Messages = nil
 	s.Tasks = append([]Task(nil), m.state.Tasks...)

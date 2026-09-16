@@ -1,3 +1,5 @@
+import { TeamGraph } from "./team-graph";
+import { newHeadDialog, reviewTeamPlan, linearConnectionDialog } from "./teams";
 import {
   coordinationDialog,
   delegationDialog,
@@ -30,7 +32,7 @@ import {
   validColor,
 } from "./creature";
 import { TerminalPane, type PaneAppearance } from "./terminal";
-import type { Project, Session, Workspace } from "./types";
+import type { Project, Session, Workspace, TeamPlan } from "./types";
 
 const STORAGE = "cloovies.workspace.layout.v1";
 class WorkspaceApp {
@@ -63,8 +65,50 @@ class WorkspaceApp {
   private canvasKey = "";
   private drafts: Record<string, string> = {};
   private appearances: Record<string, PaneAppearance> = {};
+  private view: "terminals" | "team" = "terminals";
+  private teamSelected = "";
+  private teamGraph: TeamGraph;
+  private viewSwitch = el("div", "workspace-view-switch");
+  private onlyActive = false;
+  private startHeadButton = button(
+    "Start a head agent",
+    () => this.newHead(),
+    "secondary",
+    "+ Head agent",
+  );
+  private activeFilter = button(
+    "Show only projects with running agents",
+    () => {
+      this.onlyActive = !this.onlyActive;
+      this.activeFilter.setAttribute("aria-pressed", String(this.onlyActive));
+      this.persist();
+      this.renderSidebar();
+    },
+    "active-project-filter",
+    "◉  Active agents only",
+  );
   constructor() {
     const root = document.querySelector("#workspace")!;
+    this.startHeadButton.disabled = true;
+    this.teamGraph = new TeamGraph({
+      state: () => this.state,
+      color: (id) => this.appearances[id]?.color || terminalColor(id),
+      creature: (id) => this.appearances[id]?.creature || defaultCreature(id),
+      select: (id) => this.selectTeamAgent(id),
+      newHead: () => this.newHead(),
+      review: (plan) => this.reviewPlan(plan),
+      task: (id) => coordinationDialog(this.coordinationContext(), id),
+    });
+    this.viewSwitch.setAttribute("aria-label", "Workspace view");
+    for (const [mode, label] of [
+      ["terminals", "Terminals"],
+      ["team", "Team canvas"],
+    ] as const) {
+      const b = button(label, () => this.setView(mode), "", label);
+      b.dataset.view = mode;
+      b.setAttribute("aria-pressed", String(mode === this.view));
+      this.viewSwitch.append(b);
+    }
     const brand = el("div", "brand");
     brand.append(
       creature("Grook", "brand-symbol"),
@@ -101,12 +145,20 @@ class WorkspaceApp {
         () => coordinationDialog(this.coordinationContext()),
         "secondary",
       ),
+      this.startHeadButton,
+      button(
+        "Connect Linear for agents",
+        linearConnectionDialog,
+        "subtle",
+        "Linear connection",
+      ),
       button("Setup and tools", setupDialog, "subtle"),
     );
     this.sidebar.append(
       brand,
       sideHeading,
       this.search,
+      this.activeFilter,
       this.projects,
       sideBottom,
     );
@@ -120,7 +172,7 @@ class WorkspaceApp {
         "icon-button sidebar-toggle",
         "☰",
       ),
-      el("h1", "", "Workspace"),
+      this.viewSwitch,
       this.count,
     );
     const tools = el("div", "toolbar-actions");
@@ -242,6 +294,14 @@ class WorkspaceApp {
       if (!this.initialized) {
         try {
           const saved = JSON.parse(localStorage.getItem(STORAGE) || "{}");
+          this.view = saved.view === "team" ? "team" : "terminals";
+          this.teamSelected =
+            typeof saved.teamSelected === "string" ? saved.teamSelected : "";
+          this.onlyActive = saved.onlyActive === true;
+          this.activeFilter.setAttribute(
+            "aria-pressed",
+            String(this.onlyActive),
+          );
           this.tree = parseLayout(
             saved.tree,
             new Set(state.terminals.map((t) => t.id)),
@@ -282,6 +342,7 @@ class WorkspaceApp {
           /* An invalid layout leaves an empty canvas, never loses sessions. */
         }
         this.initialized = true;
+        this.startHeadButton.disabled = false;
         if (
           nativeHandler("installTools") &&
           !state.projects.length &&
@@ -347,6 +408,9 @@ class WorkspaceApp {
       localStorage.setItem(
         STORAGE,
         JSON.stringify({
+          view: this.view,
+          teamSelected: this.teamSelected,
+          onlyActive: this.onlyActive,
           tree: this.tree,
           active: this.active,
           fontSize: this.fontSize,
@@ -392,6 +456,7 @@ class WorkspaceApp {
     renderProjectList({
       projects: this.projects,
       state: this.state,
+      onlyActive: this.onlyActive,
       search: this.search,
       tree: this.tree,
       active: this.active,
@@ -427,11 +492,21 @@ class WorkspaceApp {
   }
   private renderCanvas(): void {
     const visible = new Set(ids(this.tree));
+    if (!this.state.terminals.some((t) => t.id === this.teamSelected))
+      this.teamSelected = "";
+    if (this.view === "team" && this.teamSelected)
+      visible.add(this.teamSelected);
+    this.canvas.classList.toggle("team-mode", this.view === "team");
+    for (const b of this.viewSwitch.querySelectorAll("button"))
+      b.setAttribute("aria-pressed", String(b.dataset.view === this.view));
+    this.teamGraph.update(this.teamSelected);
     if (!visible.has(this.zoomed || "")) this.zoomed = null;
     // Status updates must not detach focused inputs or interrupt typing.
     // Divider changes already update the DOM, so ratios do not affect this key.
     const key = JSON.stringify(
       {
+        view: this.view,
+        teamSelected: this.teamSelected,
         tree: this.tree,
         zoomed: this.zoomed,
         empty: this.tree
@@ -488,6 +563,7 @@ class WorkspaceApp {
               this.appearances[t.id] = value;
               this.persist();
               this.renderSidebar();
+              this.teamGraph.update(this.teamSelected);
             },
             draft: (value) => {
               if (value) this.drafts[t.id] = value;
@@ -524,7 +600,39 @@ class WorkspaceApp {
       this.canvasKey = key;
       // Move existing pane nodes; never recreate terminals on a layout change.
       this.canvas.replaceChildren();
-      if (this.tree) {
+      if (this.view === "team") {
+        const layout = el("div", "team-workspace");
+        layout.append(this.teamGraph.element);
+        if (this.teamSelected) {
+          const dock = el("aside", "team-dock"),
+            bar = el("div", "team-dock-toolbar"),
+            host = el("div", "team-dock-host");
+          bar.append(
+            el("span", "", "IN CONVERSATION"),
+            button(
+              "Open selected agent in terminals",
+              () => this.openInTerminals(this.teamSelected),
+              "subtle",
+              "Open in terminals ↗",
+            ),
+            button(
+              "Close canvas terminal",
+              () => {
+                this.teamSelected = "";
+                this.renderCanvas();
+                this.persist();
+              },
+              "icon-button",
+              "×",
+            ),
+          );
+          const pane = this.panes.get(this.teamSelected);
+          if (pane) host.append(pane.element);
+          dock.append(bar, host);
+          layout.append(dock);
+        }
+        this.canvas.append(layout);
+      } else if (this.tree) {
         if (this.zoomed) {
           const pane = this.panes.get(this.zoomed);
           if (pane) this.canvas.append(pane.element);
@@ -535,7 +643,8 @@ class WorkspaceApp {
       } else this.renderEmpty();
       animate();
     }
-    this.count.textContent = `${visible.size} on screen`;
+    this.count.textContent =
+      this.view === "team" ? "Your team" : `${visible.size} on screen`;
     const running = this.state.terminals.filter(
       (t) => t.status === "running",
     ).length;
@@ -600,12 +709,22 @@ class WorkspaceApp {
     this.canvas.append(empty);
   }
   private show(id: string, target = this.active, axis: Axis = "row"): void {
+    if (this.view === "team") {
+      this.selectTeamAgent(id);
+      return;
+    }
     this.tree = insert(this.tree, id, target, axis);
     this.active = id;
     this.change();
     this.panes.get(id)?.focus();
   }
   private hide(id: string): void {
+    if (this.view === "team") {
+      this.teamSelected = "";
+      this.renderCanvas();
+      this.persist();
+      return;
+    }
     this.tree = remove(this.tree, id);
     this.change();
   }
@@ -624,12 +743,19 @@ class WorkspaceApp {
       pane.element.classList.toggle("focused", id === this.active);
   }
   private zoom(id: string): void {
+    if (this.view === "team") {
+      this.openInTerminals(id);
+      this.zoomed = id;
+      this.renderCanvas();
+      return;
+    }
     this.zoomed = this.zoomed === id ? null : id;
     this.active = id;
     this.renderCanvas();
     this.panes.get(id)?.focus();
   }
   private preset(mode: "columns" | "rows" | "grid"): void {
+    if (this.view === "team") this.setView("terminals");
     this.tree = arrange(ids(this.tree), mode);
     this.change();
   }
@@ -672,6 +798,46 @@ class WorkspaceApp {
       show: (id) => this.show(id),
       delegate: (id) => delegationDialog(this.coordinationContext(), id),
     };
+  }
+  private setView(view: "terminals" | "team"): void {
+    if (this.view === view) return;
+    this.view = view;
+    this.renderCanvas();
+    this.persist();
+  }
+  private selectTeamAgent(id: string): void {
+    this.teamSelected = id;
+    this.active = id;
+    this.teamGraph.reveal(id);
+    this.renderCanvas();
+    this.persist();
+    this.panes.get(id)?.focus();
+  }
+  private openInTerminals(id: string): void {
+    this.view = "terminals";
+    this.show(id);
+  }
+  private newHead(): void {
+    newHeadDialog(this.state, async (head) => {
+      await this.reloadState();
+      this.tree = insert(this.tree, head.id, this.active, "row");
+      this.view = "team";
+      this.selectTeamAgent(head.id);
+      requestAnimationFrame(() => this.teamGraph.fit());
+    });
+  }
+  private reviewPlan(plan: TeamPlan): void {
+    reviewTeamPlan(plan, this.state, async (updated) => {
+      await this.reloadState();
+      for (const task of this.state.tasks || []) {
+        if (task.planId === updated.id)
+          this.tree = insert(this.tree, task.agentId, this.active, "row");
+      }
+      this.persist();
+      this.renderSidebar();
+      this.renderCanvas();
+      requestAnimationFrame(() => this.teamGraph.fit());
+    });
   }
   private newWorktree(p: Project, parentPath?: string): void {
     worktreeDialog(
@@ -908,6 +1074,10 @@ class WorkspaceApp {
     document.body.classList.toggle("sidebar-hidden");
   }
   private focusPane(id: string): void {
+    if (this.view === "team") {
+      this.selectTeamAgent(id);
+      return;
+    }
     this.activate(id);
     if (this.zoomed && this.zoomed !== id) {
       this.zoomed = id;
@@ -934,7 +1104,12 @@ class WorkspaceApp {
     if (e.isComposing || document.querySelector('dialog[open], [role="menu"]'))
       return;
     if (e.key === "Tab" && !e.metaKey && !e.ctrlKey && !e.altKey) {
-      const order = ids(this.tree);
+      const order =
+        this.view === "team"
+          ? this.state.terminals
+              .filter((t) => t.program === "claude" || t.program === "codex")
+              .map((t) => t.id)
+          : ids(this.tree);
       if (order.length > 1) {
         e.preventDefault();
         e.stopPropagation();
