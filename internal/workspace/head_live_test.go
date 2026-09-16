@@ -92,22 +92,18 @@ func TestLiveHeadTicketConversation(t *testing.T) {
 		return false
 	})
 	branchPrefix := "live-smoke-" + id()
-	if err = m.SendMessage(head.ID, fmt.Sprintf("Create agents for my Linear tickets for me. Use both assigned SMOKE tickets, with one Codex worker for each. These are independent documentation tasks. Use branches %s-one and %s-two. Read the ticket context with the Burrow CLI, then propose the plan for my review. Do not wait or poll after proposing.", branchPrefix, branchPrefix)); err != nil {
+	if err = m.SendMessage(head.ID, fmt.Sprintf("Create agents for my Linear tickets for me. Use both assigned SMOKE tickets, with one Codex worker for each. These are independent documentation tasks. Use branches %s-one and %s-two. Read the ticket context with the Burrow CLI, then start the agents immediately. Do not wait or poll after launching.", branchPrefix, branchPrefix)); err != nil {
 		t.Fatal(err)
 	}
-	wait("Conversational request produced a Linear plan", 120*time.Second, func() bool { return len(m.Snapshot().Plans) == 1 })
+	wait("Conversational request started a Linear team", 120*time.Second, func() bool { plans := m.Snapshot().Plans; return len(plans) == 1 && plans[0].Status == "active" })
 	plan := m.Snapshot().Plans[0]
-	if len(plan.Items) != 2 || len(m.Snapshot().Terminals) != 1 {
+	if len(plan.Items) != 2 || len(m.Snapshot().Terminals) != 3 {
 		t.Fatalf("unexpected proposal: %+v", plan)
 	}
 	for _, item := range plan.Items {
 		if item.Issue == nil {
 			t.Fatal("missing Linear issue", item)
 		}
-	}
-	plan, err = m.ApprovePlan(plan.ID)
-	if err != nil || plan.Status != "active" {
-		t.Fatalf("approval: %+v %v", plan, err)
 	}
 	tasks := m.Coordination().Tasks
 	if len(tasks) != 2 {
@@ -137,5 +133,5 @@ func TestLiveHeadTicketConversation(t *testing.T) {
 		_ = m.UpdateTerminal(task.AgentID, "stop", "")
 		_ = m.UpdateTerminal(task.AgentID, "remove", "")
 	}
-	t.Log("Real head + conversational ticket request + reviewed proposal + two attached worker terminals passed")
+	t.Log("Real head + conversational ticket request + automatic launch + two attached worker terminals passed")
 }

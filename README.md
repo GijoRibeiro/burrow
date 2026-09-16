@@ -63,8 +63,8 @@ macOS shortcuts: Cmd+K opens the terminal picker, Cmd+Shift+N creates a terminal
 
 ## Optional teamwork
 
-Start a **Head agent** to discuss your Linear tickets and propose a team. Review
-its plan, then launch one worker and terminal per ticket. **Team canvas** shows
+Ask a **Head agent** to work on your Linear tickets and it starts one worker
+and terminal per ticket immediately. Discuss scope in its terminal whenever you need to. **Team canvas** shows
 heads branching into workers; click a creature to talk, or switch to **Terminals**
 to keep your familiar split layout. The head can read worker questions and send
 replies while supervising. Use **Active agents only** for a quieter sidebar.

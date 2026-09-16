@@ -79,6 +79,7 @@ export interface Coordination {
 }
 
 export interface TeamItem {
+  canceled?: boolean;
   id: string;
   name: string;
   title: string;

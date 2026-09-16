@@ -2539,3 +2539,17 @@ textarea {
 .terminal-pane.has-long-draft .pane-context {
   flex-shrink: 0;
 }
+
+.message-text a {
+  color: var(--terminal-color, var(--text));
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
+.message-text a:hover {
+  text-decoration-thickness: 2px;
+}
+.message-text a:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}

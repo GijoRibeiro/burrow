@@ -1,3 +1,4 @@
+import { appendChatText } from "./chat-links";
 import { el, button } from "./dom";
 import { imagePreviews } from "./image-previews";
 import { creature } from "./creature";
@@ -194,15 +195,16 @@ export class AgentView {
         );
         // Safe text rendering. Fenced code gets its own selectable block.
         const parts = message.text.split(/```[^\n]*\n([\s\S]*?)```/g);
-        for (const [i, text] of parts.entries())
-          if (text)
-            item.append(
-              el(
-                i % 2 ? "pre" : "p",
-                i % 2 ? "message-code" : "message-text",
-                text.trim(),
-              ),
-            );
+        for (const [i, text] of parts.entries()) {
+          if (!text) continue;
+          const block = el(
+            i % 2 ? "pre" : "p",
+            i % 2 ? "message-code" : "message-text",
+          );
+          if (i % 2) block.textContent = text.trim();
+          else appendChatText(block, text.trim());
+          item.append(block);
+        }
         const previews = imagePreviews(this.terminalId, message.text);
         if (previews) item.append(previews);
         nodes.push(item);

@@ -501,10 +501,10 @@ export class TerminalPane {
       return;
     }
     if (!notice) {
-      notice = button("Review head plan", () => {}, "head-plan-notice");
+      notice = button("Team details", () => {}, "head-plan-notice");
       this.element.querySelector(".pane-header")?.after(notice);
     }
-    notice.textContent = `Plan ready · ${count} agents · ${title} → Review`;
+    notice.textContent = `Team · ${count} agents · ${title} → Details`;
     notice.onclick = review;
   }
   prepareMessage(text: string): void {

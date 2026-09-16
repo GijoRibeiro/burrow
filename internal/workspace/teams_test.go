@@ -15,7 +15,7 @@ import (
 	"testing"
 )
 
-func TestHeadDiscussesBeforeWorkersAndReadsLinear(t *testing.T) {
+func TestTeamPreparationValidatesIdentityAndLinearContext(t *testing.T) {
 	m, p, ordinary := coordinationManager(t)
 	head, err := m.CreateHead(p.ID, p.Path, "Morning lead", "claude", "Help me choose three Linear tickets")
 	if err != nil {
@@ -69,20 +69,20 @@ func TestHeadDiscussesBeforeWorkersAndReadsLinear(t *testing.T) {
 	if w := request(ordinary, AgentAction{Action: "propose", Plan: &v}); w.Code != 400 {
 		t.Fatal("ordinary agent created a team plan")
 	}
-	plan, err := m.ProposePlan(head.ID, v)
+	plan, err := m.preparePlan(head.ID, v)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(m.Snapshot().Terminals) != 2 || len(m.Snapshot().Projects[0].Worktrees) != 1 {
 		t.Fatal("proposal spawned workers")
 	}
-	if _, err = m.ProposePlan(head.ID, v); err == nil {
+	if _, err = m.preparePlan(head.ID, v); err == nil {
 		t.Fatal("duplicate pending plan accepted")
 	}
 	if w := request(head, AgentAction{Action: "approve"}); w.Code != 400 {
 		t.Fatal("agent approved own plan")
 	}
-	result, err := m.ApprovePlan(plan.ID)
+	result, err := m.StartPlan(plan.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestTeamPartialLaunchRetryAcrossRestartIsIdempotent(t *testing.T) {
 	if err != nil || !strings.Contains(command, "developer_instructions=") || !strings.Contains(command, "--dangerously-bypass-approvals-and-sandbox") || !strings.Contains(command, head.Goal) {
 		t.Fatalf("Codex head launch: %s %v", command, err)
 	}
-	plan, err := m.ProposePlan(head.ID, PlanRequest{Title: "Team", Summary: "Independent tasks", Items: []PlanItemRequest{
+	plan, err := m.preparePlan(head.ID, PlanRequest{Title: "Team", Summary: "Independent tasks", Items: []PlanItemRequest{
 		{Name: "one", Title: "One", Program: "claude", Instructions: "First task"},
 		{Name: "two", Title: "Two", Program: "codex", Instructions: "Second task"},
 	}})
@@ -145,7 +145,7 @@ func TestTeamPartialLaunchRetryAcrossRestartIsIdempotent(t *testing.T) {
 	if err = os.Remove(binary); err != nil {
 		t.Fatal(err)
 	}
-	partial, err := m.ApprovePlan(plan.ID)
+	partial, err := m.StartPlan(plan.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestTeamPartialLaunchRetryAcrossRestartIsIdempotent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			result, e := loaded.ApprovePlan(plan.ID)
+			result, e := loaded.StartPlan(plan.ID)
 			if e != nil || result.Status != "active" {
 				t.Errorf("retry: %v %+v", e, result)
 			}
@@ -188,17 +188,17 @@ func TestDismissedPlanNeverLaunches(t *testing.T) {
 		t.Fatal(e)
 	}
 	v := PlanRequest{Title: "Plan", Summary: "Needs discussion", Items: []PlanItemRequest{{Name: "draft", Title: "Draft", Program: "codex", Instructions: "Do task"}}}
-	plan, e := m.ProposePlan(head.ID, v)
+	plan, e := m.preparePlan(head.ID, v)
 	if e != nil {
 		t.Fatal(e)
 	}
 	if _, e = m.DismissPlan(plan.ID); e != nil {
 		t.Fatal(e)
 	}
-	if _, e = m.ApprovePlan(plan.ID); e == nil {
+	if _, e = m.StartPlan(plan.ID); e == nil {
 		t.Fatal("dismissed plan launched")
 	}
-	if _, e = m.ProposePlan(head.ID, v); e != nil {
+	if _, e = m.preparePlan(head.ID, v); e != nil {
 		t.Fatal("could not revise dismissed plan", e)
 	}
 	if len(m.state.Tasks) != 0 {
@@ -212,11 +212,11 @@ func TestApprovedTeamRecoversInterruptedWorkerLaunch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := m.ProposePlan(head.ID, PlanRequest{Title: "Recovery", Summary: "One worker", Items: []PlanItemRequest{{Name: "recover", Title: "Recover", Program: "codex", Instructions: "Finish task"}}})
+	plan, err := m.preparePlan(head.ID, PlanRequest{Title: "Recovery", Summary: "One worker", Items: []PlanItemRequest{{Name: "recover", Title: "Recover", Program: "codex", Instructions: "Finish task"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err = m.ApprovePlan(plan.ID)
+	plan, err = m.StartPlan(plan.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,7 @@ func TestApprovedTeamRecoversInterruptedWorkerLaunch(t *testing.T) {
 	if err = loaded.ConfigureAgentRuntime("http://127.0.0.1:4337"); err != nil {
 		t.Fatal(err)
 	}
-	result, err := loaded.ApprovePlan(plan.ID)
+	result, err := loaded.StartPlan(plan.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,5 +247,106 @@ func TestApprovedTeamRecoversInterruptedWorkerLaunch(t *testing.T) {
 	}
 	if _, err = loaded.tmux("has-session", "-t", "="+sessionName(task.AgentID)); err != nil {
 		t.Fatal("worker process missing", err)
+	}
+}
+
+func TestHeadRequestStartsWorkersAndRemovalSurvivesRetry(t *testing.T) {
+	m, p, _ := coordinationManager(t)
+	head, err := m.CreateHead(p.ID, p.Path, "Head", "claude", "Start two agents")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := PlanRequest{Title: "Direct team", Summary: "Start requested work", Items: []PlanItemRequest{
+		{Name: "direct-one", Title: "One", Program: "codex", Instructions: "First task"},
+		{Name: "direct-two", Title: "Two", Program: "codex", Instructions: "Second task"},
+	}}
+	b, _ := json.Marshal(AgentAction{Action: "propose", Plan: &v})
+	r := httptest.NewRequest("POST", "http://localhost/api/workspace/agent", bytes.NewReader(b))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("X-Burrow-Agent", head.ID)
+	r.Header.Set("Authorization", "Bearer "+m.state.AgentTokens[head.ID])
+	w := httptest.NewRecorder()
+	m.Handler().ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	var plan TeamPlan
+	if err = json.Unmarshal(w.Body.Bytes(), &plan); err != nil || plan.Status != "active" {
+		t.Fatal(plan, err)
+	}
+	tasks := m.Coordination().Tasks
+	if len(tasks) != 2 {
+		t.Fatal(tasks)
+	}
+	removed, kept := tasks[0], tasks[1]
+	if err = m.UpdateTerminal(removed.AgentID, "remove", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = m.tmux("has-session", "-t", "="+sessionName(removed.AgentID)); err == nil {
+		t.Fatal("removed process still running")
+	}
+	if _, err = os.Stat(removed.Path); err != nil {
+		t.Fatal("removed checkout", err)
+	}
+	// A partial launch retry cannot recreate a removed worker.
+	m.state.Plans[0].Status = "partial"
+	if err = m.save(); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := New(m.file, m.socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = loaded.ConfigureAgentRuntime("http://127.0.0.1:4337"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = loaded.StartPlan(plan.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = loaded.Terminal(removed.AgentID); err == nil {
+		t.Fatal("worker returned")
+	}
+	// Removing a head leaves existing workers and their worktrees intact.
+	if err = loaded.UpdateTerminal(head.ID, "remove", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = loaded.tmux("has-session", "-t", "="+sessionName(kept.AgentID)); err != nil {
+		t.Fatal("worker stopped with head", err)
+	}
+	if _, err = loaded.StartPlan(plan.ID); err == nil {
+		t.Fatal("removed head's plan restarted")
+	}
+}
+
+func TestRemovePendingWorkerAndRaceWithFinishedLaunch(t *testing.T) {
+	m, p, _ := coordinationManager(t)
+	head, err := m.CreateHead(p.ID, p.Path, "Head", "claude", "Discuss")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := m.preparePlan(head.ID, PlanRequest{Title: "Pending", Summary: "Pending", Items: []PlanItemRequest{
+		{Name: "skip", Title: "Skip", Program: "codex", Instructions: "Skip"},
+		{Name: "keep", Title: "Keep", Program: "codex", Instructions: "Keep"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = m.RemovePlannedWorker(plan.ID, plan.Items[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	plan, err = m.StartPlan(plan.ID)
+	if err != nil || len(m.state.Tasks) != 1 {
+		t.Fatal(plan, err)
+	}
+	task := m.state.Tasks[0]
+	// Stale placeholder removal after launch must remove the actual terminal too.
+	if err = m.RemovePlannedWorker(plan.ID, plan.Items[1].ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = m.Terminal(task.AgentID); err == nil {
+		t.Fatal("late removal left terminal")
+	}
+	if _, err = os.Stat(task.Path); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -10,17 +10,19 @@ three, and coordinate one worker per ticket.” Use **Linear connection** in the
 sidebar to connect your personal API key once. The head uses your existing CLI
 account; no extra AI subscription or API key is required by Burrow. Provider
 sign-in or first-folder trust screens can still appear: use **Terminal view** to
-complete them. Workers are created after approval, but a provider awaiting its
+complete them. Workers start as soon as the head delegates your request, but a provider awaiting its
 own onboarding needs your attention before it can work.
 
 The head can read your assigned open tickets, fetch full ticket descriptions,
-discuss scope in its terminal, and propose a team. Empty Linear searches return
-up to 50 open assigned tickets; search by title or identifier to narrow the list.
-Proposed workers appear as dashed cards. **Review plan** shows the rationale,
-provider, branch, ticket link, and instructions for each worker. **Approve and
-start team** creates one child checkout and terminal per item. **Ask for a
-different plan** dismisses it and sends feedback to the head; continue the
-conversation before it proposes a replacement.
+and start a team directly from your request. Empty Linear searches return up to
+50 open assigned tickets; search by title or identifier to narrow the list.
+There is no separate team approval step. **Team details** shows each assignment,
+provider, branch, ticket link, and instructions. Failed launches expose **Retry
+remaining workers**, which preserves workers already created. Old pending plans
+from earlier versions can be resumed with **Start pending workers**.
+
+For discussion-only requests, the head stays in the conversation until you ask
+it to start. You can always talk directly to the head or any worker's terminal.
 
 Plans support up to 12 independent assignments. Each team belongs to the head's
 project and starts from the head checkout's committed state. Use separate heads
@@ -29,12 +31,12 @@ after you integrate its prerequisites. The head is instructed to coordinate and
 leave implementation to isolated workers.
 
 The head acknowledges requests before running tools. For a concrete request such
-as “Create agents for SMOKE-1 and SMOKE-2,” it reads the ticket context and proposes
-a plan. It returns control after proposing instead of polling while you review.
-The plan can be reviewed directly inside the head's terminal or on the canvas.
+as “Create agents for SMOKE-1 and SMOKE-2,” it reads the ticket context and starts the workers automatically. It reports
+which agents started and returns control to the conversation. Team details
+remain available in the head's terminal and canvas context menu.
 
 The head receives worker questions and status updates through its durable inbox.
-Ask it to supervise an approved team: it checks messages, answers workers, and
+Ask it to supervise a team: it checks messages, answers workers, and
 uses at most one empty `wait 60` before returning with an update. It is a CLI
 agent, not an always-on scheduler. Closing the app preserves processes, but
 coordination requests need the local app server to be running.
@@ -106,7 +108,7 @@ Statuses are **working**, **waiting** (needs an answer), **done**, and **cancele
 
 A done task records the exact result commit. **Review changes** shows its committed changes since the common ancestor with the parent. **Integrate into parent** asks for confirmation, then merges that recorded commit. It requires the original parent branch, an unchanged parent commit since review, a clean parent checkout, and no existing merge/rebase/cherry-pick. A conflicting merge is aborted; the parent returns to its previous committed state. Git hooks and repository configuration still apply. Large diffs are truncated in the preview and should be reviewed fully in the terminal.
 
-There is no automatic merging or dependency scheduler. Ordinary agents can delegate smaller tasks with the CLI, creating another level of child worktrees. Head agents use reviewed team plans instead of the direct delegation command.
+There is no automatic merging or dependency scheduler. Ordinary agents can delegate smaller tasks with the CLI, creating another level of child worktrees. Head agents use the propose command to start a managed team immediately.
 
 ## Agent CLI
 
@@ -143,5 +145,17 @@ The local server validates an agent-specific token for agent API calls and deriv
 to a built workspace executable and `BURROW_SMOKE_REPO` to a disposable, trusted
 Git checkout. It uses the local Claude account with fake Linear tickets and
 local Codex fixtures. It sends a conversational ticket request, waits for a
-reviewable plan, approves it, and verifies worker terminals and parent messages.
+running team, and verifies worker terminals and parent messages without a UI approval.
 Do not point it at a real project. Normal Go and browser tests use fixtures only.
+
+### Removing canvas nodes
+
+Right-click any agent and choose **Remove agent…**. This stops that agent and
+removes its node in one action; its checkout and files stay on disk. Removing a
+head leaves existing workers running. Pending worker cards can also be removed,
+including when a launch finishes just before the removal request arrives.
+Removed assignments stay removed across reloads and launch retries. Task history
+is retained for reviewing and integrating existing work.
+
+Chat recognizes Markdown links and plain HTTP(S) URLs, including localhost.
+Links open in your browser; inline and fenced code stays literal.

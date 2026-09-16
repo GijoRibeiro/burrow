@@ -158,9 +158,20 @@ final class WorkspaceApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
     }
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url else { decisionHandler(.cancel); return }
-        if url.scheme == "about" || (url.host == baseURL.host && url.port == baseURL.port) { decisionHandler(.allow) }
-        else { if navigationAction.navigationType == .linkActivated && ["http", "https"].contains(url.scheme ?? "") { NSWorkspace.shared.open(url) }; decisionHandler(.cancel) }
+        if navigationAction.navigationType == .linkActivated && ["http", "https"].contains(url.scheme ?? "") {
+            NSWorkspace.shared.open(url)
+            decisionHandler(.cancel)
+        } else if url.scheme == "about" || (url.host == baseURL.host && url.port == baseURL.port) {
+            decisionHandler(.allow)
+        } else { decisionHandler(.cancel) }
     }
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        if let url = navigationAction.request.url, ["http", "https"].contains(url.scheme ?? "") {
+            NSWorkspace.shared.open(url)
+        }
+        return nil
+    }
+
 }
 let application = NSApplication.shared
 let delegate = WorkspaceApp(); application.delegate = delegate; application.run()
