@@ -123,6 +123,11 @@ func command(dir, bin string, args ...string) (string, error) {
 func commandContext(ctx context.Context, dir, bin string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = dir
+	// Apple Git can launch a child Git process. Stop that child on timeout too;
+	// leave tmux alone because it deliberately owns persistent terminal sessions.
+	if filepath.Base(bin) == "git" {
+		isolateCloneProcess(cmd)
+	}
 	// Bound inherited pipes too: a descendant may keep stdout open after Git exits.
 	cmd.WaitDelay = time.Second
 	out, err := cmd.CombinedOutput()

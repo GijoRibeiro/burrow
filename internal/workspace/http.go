@@ -34,6 +34,10 @@ func (m *Manager) Handler() http.Handler {
 	m.coordinationRoutes(mux)
 	m.teamRoutes(mux)
 	m.githubRoutes(mux)
+	// Native readiness must not scan repositories or start external processes.
+	mux.HandleFunc("GET /api/workspace/health", func(w http.ResponseWriter, r *http.Request) {
+		respond(w, map[string]string{"service": "cloovies-workspace"}, nil)
+	})
 	mux.HandleFunc("GET /api/workspace", func(w http.ResponseWriter, r *http.Request) { respond(w, m.Snapshot(), nil) })
 	mux.HandleFunc("POST /api/workspace/projects", func(w http.ResponseWriter, r *http.Request) {
 		var v struct{ Path, Name string }
