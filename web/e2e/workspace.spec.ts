@@ -2216,6 +2216,9 @@ test("ordinary folders support agents and discover Git when it is added later", 
   await dialog
     .getByRole("button", { name: "Add project", exact: true })
     .click();
+  await page
+    .getByRole("button", { name: "Keep as folder", exact: true })
+    .click();
   await expect(dialog).toHaveCount(0);
   const group = page.locator(".project-group").filter({
     has: page.getByRole("button", {
@@ -2614,6 +2617,9 @@ test("canvas creates agents directly in existing projects and arbitrary folders"
   await dialog
     .getByRole("button", { name: "Start agent", exact: true })
     .click();
+  await page
+    .getByRole("button", { name: "Keep as folder", exact: true })
+    .click();
   await expect(dialog).toBeHidden();
   state = await (await page.request.get("/api/workspace")).json();
   const second = state.terminals.find(
@@ -2643,4 +2649,103 @@ test("canvas creates agents directly in existing projects and arbitrary folders"
   expect(
     tmux("display-message", "-p", "-t", `=cw-${first.id}:`, "#{pane_pid}"),
   ).toBe(pid);
+});
+
+test("project setup offers Git and head picker initializes folders without hiding them", async ({
+  page,
+}, info) => {
+  const root = process.env.CLOOVIES_E2E_ROOT!;
+  const folder = join(root, "New Git folder");
+  mkdirSync(folder);
+  writeFileSync(join(folder, "notes.txt"), "Keep my project files");
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: "Add project", exact: true })
+    .first()
+    .click();
+  const add = page.getByRole("dialog", { name: "Add a project", exact: true });
+  await add.getByLabel("Project folder").fill(folder);
+  await add.getByRole("button", { name: "Add project", exact: true }).click();
+  let setup = page.getByRole("dialog", {
+    name: "Create Git repository",
+    exact: true,
+  });
+  await expect(setup).toContainText("has no Git repository");
+  await setup
+    .getByRole("button", { name: "Create Git repository", exact: true })
+    .click();
+  await expect(add).toBeHidden();
+  expect(existsSync(join(folder, ".git"))).toBe(true);
+  expect(
+    execFileSync("git", ["-C", folder, "ls-files"], {
+      encoding: "utf8",
+    }).trim(),
+  ).toBe("");
+  const plain = join(root, "Head without Git");
+  mkdirSync(plain);
+  writeFileSync(join(plain, "draft.txt"), "Uncommitted work");
+  const project = await (
+    await page.request.post("/api/workspace/projects", {
+      data: { path: plain },
+    })
+  ).json();
+  const original = await (
+    await page.request.post("/api/workspace/terminals", {
+      data: {
+        projectId: project.id,
+        path: project.path,
+        name: "Existing folder agent",
+        program: "claude",
+      },
+    })
+  ).json();
+  const pid = tmux(
+    "display-message",
+    "-p",
+    "-t",
+    `=cw-${original.id}:`,
+    "#{pane_pid}",
+  );
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Start a head agent", exact: true })
+    .first()
+    .click();
+  const head = page
+    .getByRole("dialog")
+    .filter({
+      has: page.getByRole("heading", { name: "Meet your head agent" }),
+    });
+  const picker = head.getByLabel("Project / checkout", { exact: true });
+  await expect(picker).toContainText("Head without Git · No Git");
+  await expect(picker).toContainText("New Git folder / Main checkout");
+  await picker.selectOption(JSON.stringify([project.id, project.path]));
+  await expect(head.locator(".head-git-setup")).toContainText(
+    "has no Git repository",
+  );
+  await head.screenshot({ path: info.outputPath("head-no-git.png") });
+  await head
+    .getByRole("button", { name: "Create Git repository", exact: true })
+    .click();
+  await expect(head.locator(".head-git-setup")).toBeHidden();
+  await expect(picker).not.toContainText("Head without Git · No Git");
+  await head.getByLabel("Name", { exact: true }).fill("Folder head");
+  await head
+    .getByLabel("What are we working on?", { exact: true })
+    .fill("Help prepare the first commit before creating workers.");
+  await head
+    .getByRole("button", { name: "Start the conversation", exact: true })
+    .click();
+  await expect(head).toBeHidden();
+  const state = await (await page.request.get("/api/workspace")).json();
+  expect(state.projects.find((p: any) => p.id === project.id).git).toBe(true);
+  expect(state.terminals.find((t: any) => t.name === "Folder head").role).toBe(
+    "head",
+  );
+  expect(
+    tmux("display-message", "-p", "-t", `=cw-${original.id}:`, "#{pane_pid}"),
+  ).toBe(pid);
+  expect(
+    execFileSync("git", ["-C", plain, "ls-files"], { encoding: "utf8" }).trim(),
+  ).toBe("");
 });

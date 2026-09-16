@@ -1,6 +1,7 @@
 import { api } from "./api";
+import { offerGitSetup } from "./git-setup";
 import { button, dialog, el } from "./dom";
-import type { Session, TeamPlan, Workspace } from "./types";
+import type { Project, Session, TeamPlan, Workspace } from "./types";
 
 export function newHeadDialog(
   state: Workspace,
@@ -8,19 +9,20 @@ export function newHeadDialog(
   existing?: Session,
 ): void {
   const folders = state.projects
-    .filter(
-      (p) => p.git !== false && (!existing || p.id === existing.projectId),
-    )
+    .filter((p) => !existing || p.id === existing.projectId)
     .flatMap((p) =>
       p.worktrees.map((w) => ({
         value: JSON.stringify([p.id, w.path]),
-        label: `${p.name} / ${w.branch || w.name}`,
+        label:
+          p.git === false
+            ? `${p.name} · No Git`
+            : `${p.name} / ${w.main ? "Main checkout · " : ""}${w.branch || w.name}`,
       })),
     );
   if (!folders.length) {
     dialog(
-      "A Git project is needed for a head",
-      "Heads create workers in Git worktrees. Add a Git repository, or start individual agents directly in your project folder.",
+      "Add a project for your head",
+      "Add a project folder first. You can create its Git repository from this picker.",
       [],
       "Got it",
       async () => {},
@@ -41,7 +43,7 @@ export function newHeadDialog(
             JSON.parse(b.value)[1].length - JSON.parse(a.value)[1].length,
         )[0]
     : undefined;
-  dialog(
+  const d = dialog(
     "Meet your head agent",
     "Tell your head what to work on. It can read Linear, create agents, and coordinate them immediately. You can discuss scope directly in its terminal.",
     [
@@ -73,6 +75,15 @@ export function newHeadDialog(
     "Start the conversation",
     async (values) => {
       const [projectId, path] = JSON.parse(values.folder);
+      let project = state.projects.find((p) => p.id === projectId)!;
+      if (project.git === false) {
+        project = await offerGitSetup(project);
+        if (project.git === false)
+          throw new Error(
+            "A head needs Git. Create the repository here, or use an individual agent in this folder.",
+          );
+        updateProject(project);
+      }
       const head = await api<Session>("/heads", "POST", {
         projectId,
         path,
@@ -83,6 +94,52 @@ export function newHeadDialog(
       await ready(head);
     },
   );
+  const folder = d.querySelector<HTMLSelectElement>('select[name="folder"]')!;
+  const panel = el("div", "head-git-setup");
+  const note = el("p", "history-note");
+  const initialize = button(
+    "Create Git repository",
+    async () => {
+      const [id] = JSON.parse(folder.value);
+      initialize.disabled = folder.disabled = true;
+      const submit = d.querySelector<HTMLButtonElement>(
+        'button[type="submit"]',
+      )!;
+      submit.disabled = true;
+      note.textContent = "Creating Git repository…";
+      try {
+        updateProject(await api<Project>(`/projects/${id}/git`, "POST", {}));
+      } catch (e) {
+        note.textContent = e instanceof Error ? e.message : String(e);
+      } finally {
+        initialize.disabled = folder.disabled = submit.disabled = false;
+      }
+    },
+    "secondary",
+  );
+  panel.append(note, initialize);
+  folder.closest("label")!.after(panel);
+  function updateProject(project: Project) {
+    const old = state.projects.find((p) => p.id === project.id)!;
+    Object.assign(old, project);
+    for (const option of folder.options) {
+      const [id, path] = JSON.parse(option.value);
+      if (id === project.id) {
+        const tree = project.worktrees.find((w) => w.path === path);
+        option.textContent = `${project.name} / ${tree?.main ? "Main checkout · " : ""}${tree?.branch || "main"}`;
+      }
+    }
+    refreshGitPanel();
+  }
+  function refreshGitPanel() {
+    const [id] = JSON.parse(folder.value);
+    const project = state.projects.find((p) => p.id === id)!;
+    initialize.hidden = project.git !== false;
+    panel.hidden = project.git !== false;
+    note.textContent = `${project.name} has no Git repository. Create a local one here to start a head. Files stay uncommitted; your head can help prepare the first commit before creating worktrees.`;
+  }
+  folder.addEventListener("change", refreshGitPanel);
+  refreshGitPanel();
 }
 export function linearConnectionDialog(): void {
   const d = el("dialog", "dialog"),

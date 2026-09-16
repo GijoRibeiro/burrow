@@ -76,6 +76,13 @@ worktrees; creating worktrees and delegated teams requires Git and a first commi
 If you initialize Git later, the app detects it while keeping the same project
 and terminal sessions.
 
+Adding a folder without Git offers **Create Git repository** or **Keep as folder**.
+The head picker also lists these projects as **No Git**, with a creation button.
+Initialization creates local repository metadata and preserves existing files and
+sessions. It does not stage files or make commits; the head can help prepare the
+first commit before launching workers in worktrees. Main checkouts are explicitly
+labeled in the picker alongside their current branch.
+
 Ask a **Head agent** to work on your Linear tickets and it starts one worker
 and terminal per ticket immediately. Discuss scope in its terminal whenever you need to. **Team canvas** shows
 heads branching into workers; click a creature to talk, or switch to **Terminals**

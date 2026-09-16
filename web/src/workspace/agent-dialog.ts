@@ -1,4 +1,5 @@
 import { api } from "./api";
+import { offerGitSetup } from "./git-setup";
 import { button, el } from "./dom";
 import { nativeHandler } from "./setup";
 import type { Project, Session, Workspace } from "./types";
@@ -147,9 +148,11 @@ export function agentDialog(
     try {
       if (!created) {
         const existing = folders.find((f) => f.tree.path === location.value);
-        const project =
+        let project =
           existing?.project ||
           (await api<Project>("/projects", "POST", { path: folder }));
+        if (!existing && !state.projects.some((p) => p.id === project.id))
+          project = await offerGitSetup(project);
         created = await api<Session>("/terminals", "POST", {
           projectId: project.id,
           path: folder,

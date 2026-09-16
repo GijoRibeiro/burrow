@@ -40,7 +40,7 @@ export function dialog(
   submit: string,
   run: (values: Record<string, string>) => Promise<void>,
   danger = false,
-): void {
+): HTMLDialogElement {
   const d = el("dialog", "dialog");
   const form = el("form");
   const error = el("p", "form-error");
@@ -133,4 +133,5 @@ export function dialog(
   document.body.append(d);
   d.addEventListener("close", () => d.remove());
   d.showModal();
+  return d;
 }

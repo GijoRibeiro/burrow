@@ -44,6 +44,10 @@ func (m *Manager) Handler() http.Handler {
 		respond(w, p, e)
 	})
 	mux.HandleFunc("DELETE /api/workspace/projects/{id}", func(w http.ResponseWriter, r *http.Request) { respond(w, nil, m.RemoveProject(r.PathValue("id"))) })
+	mux.HandleFunc("POST /api/workspace/projects/{id}/git", func(w http.ResponseWriter, r *http.Request) {
+		p, err := m.InitializeProjectGit(r.PathValue("id"))
+		respond(w, p, err)
+	})
 	mux.HandleFunc("POST /api/workspace/projects/{id}/worktrees", func(w http.ResponseWriter, r *http.Request) {
 		var v struct{ Name, Base, IssueID, ParentPath string }
 		if !decode(w, r, &v) {
