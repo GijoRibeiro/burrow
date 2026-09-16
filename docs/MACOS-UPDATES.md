@@ -37,6 +37,14 @@ For a local update:
 The native repair was verified with the existing tmux server running a separate,
 read-only Git probe; no prompts or commands were sent to working agents.
 
+Native readiness uses `/api/workspace/health`, which does not scan repositories.
+A slow Git operation therefore cannot cause repeated startup scans. Git timeouts
+also stop descendants, including the child process launched by Apple's Git shim.
+If an updated build opens but Git scans time out on an existing project, try
+**Add project → Browse** and select that project's folder again to renew the
+native folder selection. You can cancel the Add project dialog afterward. This
+restored folder access during the v0.5.1 update and survived a normal relaunch.
+
 For distribution, sign successive releases with the same Developer ID identity
 and notarize them. The current ad-hoc preview does not provide permission
 continuity across releases. `CLOOVIES_SIGN_IDENTITY` selects the packaging signing

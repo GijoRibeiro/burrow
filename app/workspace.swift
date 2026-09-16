@@ -79,9 +79,9 @@ final class WorkspaceApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
         probe(attempt: 0)
     }
     private func probe(attempt: Int) {
-        var request = URLRequest(url: baseURL.appendingPathComponent("api/workspace")); request.timeoutInterval = 1
+        var request = URLRequest(url: baseURL.appendingPathComponent("api/workspace/health")); request.timeoutInterval = 1
         URLSession.shared.dataTask(with: request) { data, response, _ in
-            let valid = (response as? HTTPURLResponse)?.statusCode == 200 && data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }?["terminals"] != nil
+            let valid = (response as? HTTPURLResponse)?.statusCode == 200 && data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }?["service"] as? String == "cloovies-workspace"
             DispatchQueue.main.async {
                 if valid { self.web.load(URLRequest(url: self.baseURL)); return }
                 if attempt == 0 { self.startDaemon() }
