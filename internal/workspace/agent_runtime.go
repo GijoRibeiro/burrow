@@ -181,6 +181,16 @@ func (m *Manager) agentAction(w http.ResponseWriter, r *http.Request) {
 		}
 		m.mu.Unlock()
 		respond(w, rows, nil)
+	case "start":
+		m.mu.Lock()
+		plan, e := m.teamPlan(v.Query)
+		m.mu.Unlock()
+		if e != nil || actor.Role != "head" || plan.HeadID != actor.ID {
+			respond(w, nil, errors.New("choose a team belonging to this head"))
+			return
+		}
+		plan, e = m.StartPlan(plan.ID)
+		respond(w, plan, e)
 	case "propose":
 		if v.Plan == nil {
 			respond(w, nil, errors.New("provide a plan"))

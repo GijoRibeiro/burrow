@@ -350,3 +350,42 @@ func TestRemovePendingWorkerAndRaceWithFinishedLaunch(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestHeadCanResumeOwnPendingTeam(t *testing.T) {
+	m, p, ordinary := coordinationManager(t)
+	head, err := m.CreateHead(p.ID, p.Path, "Head", "claude", "Wait")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := m.CreateHead(p.ID, p.Path, "Other", "codex", "Wait")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := m.preparePlan(head.ID, PlanRequest{Title: "Old pending plan", Summary: "Resume", Items: []PlanItemRequest{{Name: "resume", Title: "Resume", Program: "codex", Instructions: "Continue"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := func(actor Terminal) *httptest.ResponseRecorder {
+		b, _ := json.Marshal(AgentAction{Action: "start", Query: plan.ID})
+		r := httptest.NewRequest("POST", "http://localhost/api/workspace/agent", bytes.NewReader(b))
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("X-Burrow-Agent", actor.ID)
+		r.Header.Set("Authorization", "Bearer "+m.state.AgentTokens[actor.ID])
+		w := httptest.NewRecorder()
+		m.Handler().ServeHTTP(w, r)
+		return w
+	}
+	for _, actor := range []Terminal{ordinary, other} {
+		if w := request(actor); w.Code != 400 {
+			t.Fatal("another agent started the team")
+		}
+	}
+	for i := 0; i < 2; i++ {
+		if w := request(head); w.Code != 200 {
+			t.Fatal(w.Body.String())
+		}
+	}
+	if len(m.state.Tasks) != 1 || m.state.Plans[0].Status != "active" {
+		t.Fatal("team did not resume exactly once")
+	}
+}

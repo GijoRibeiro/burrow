@@ -19,7 +19,9 @@ and start a team directly from your request. Empty Linear searches return up to
 There is no separate team approval step. **Team details** shows each assignment,
 provider, branch, ticket link, and instructions. Failed launches expose **Retry
 remaining workers**, which preserves workers already created. Old pending plans
-from earlier versions can be resumed with **Start pending workers**.
+from earlier versions can be resumed by asking the head to start them, or with
+**Start pending workers** in team details. The head uses `start <plan-id>` to
+resume a pending team or retry a failed launch without duplicating workers.
 
 For discussion-only requests, the head stays in the conversation until you ask
 it to start. You can always talk directly to the head or any worker's terminal.
