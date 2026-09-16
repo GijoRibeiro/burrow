@@ -99,6 +99,11 @@ func (m *Manager) createProgramTerminal(projectID, path, name, program, role, go
 	if err != nil {
 		return Terminal{}, err
 	}
+	if role == "head" {
+		if err = requireGitCheckout(p.Path); err != nil {
+			return Terminal{}, err
+		}
+	}
 	if path == "" {
 		path = p.Path
 	}
@@ -106,7 +111,7 @@ func (m *Manager) createProgramTerminal(projectID, path, name, program, role, go
 	if err != nil {
 		return Terminal{}, err
 	}
-	trees, err := listWorktrees(p.Path)
+	trees, _, err := projectCheckouts(p.Path)
 	if err != nil {
 		return Terminal{}, err
 	}
@@ -117,7 +122,7 @@ func (m *Manager) createProgramTerminal(projectID, path, name, program, role, go
 		}
 	}
 	if !found {
-		return Terminal{}, errors.New("terminal folder must be a worktree of the selected project")
+		return Terminal{}, errors.New("terminal folder must be the project folder or one of its worktrees")
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {

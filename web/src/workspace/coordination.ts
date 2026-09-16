@@ -22,11 +22,15 @@ export function delegationDialog(
 ): void {
   const agents = ctx
     .state()
-    .terminals.filter((t) => t.program === "claude" || t.program === "codex");
+    .terminals.filter(
+      (t) =>
+        (t.program === "claude" || t.program === "codex") &&
+        ctx.state().projects.find((p) => p.id === t.projectId)?.git !== false,
+    );
   if (!agents.length) {
     dialog(
-      "Start an agent first",
-      "Create a Claude or Codex terminal, then delegate a task from it. Ordinary shells and worktrees work as before.",
+      "Delegation needs a Git project",
+      "Start a Claude or Codex agent in a Git repository to create child worktrees. You can work directly with agents in any folder.",
       [],
       "Got it",
       async () => {},

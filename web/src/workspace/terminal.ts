@@ -150,7 +150,10 @@ export class TerminalPane {
     const tree = project.worktrees.find((w) => w.path === session.path);
     this.connection.hidden = true;
     context.append(this.agent.heading, this.connection);
-    context.title = `Branch: ${tree?.branch || "detached"}\n${session.path}`;
+    context.title =
+      project.git === false
+        ? session.path
+        : `Branch: ${tree?.branch || "detached"}\n${session.path}`;
     const switcher = el("div", "view-switcher");
     switcher.setAttribute("role", "group");
     switcher.setAttribute("aria-label", "Pane view");

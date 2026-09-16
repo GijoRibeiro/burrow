@@ -86,6 +86,9 @@ func (m *Manager) delegate(v DelegateRequest, planID, itemID string, issue *line
 	if err != nil {
 		return Task{}, err
 	}
+	if err = requireGitCheckout(parent.Path); err != nil {
+		return Task{}, err
+	}
 	if parent.Role == "head" && planID == "" {
 		return Task{}, errors.New("head agents propose a plan first; the propose command starts the workers immediately")
 	}

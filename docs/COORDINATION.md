@@ -1,6 +1,6 @@
 # Optional agent teamwork
 
-Ordinary projects, worktrees, Claude/Codex terminals, shells, and the cross-project canvas keep working independently. Teamwork is opt-in.
+Ordinary projects, worktrees, Claude/Codex terminals, shells, and the cross-project canvas keep working independently. Teamwork is opt-in. Ordinary project folders do not need Git to run individual agents or shells. Heads and delegated tasks use Git worktrees and require a Git repository with an initial commit.
 
 ## A head agent and a team canvas
 

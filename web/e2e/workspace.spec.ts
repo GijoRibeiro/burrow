@@ -2198,3 +2198,127 @@ test("chat hyperlinks open separately and code stays literal", async ({
     data: { action: "remove" },
   });
 });
+
+test("ordinary folders support agents and discover Git when it is added later", async ({
+  page,
+}) => {
+  const path = join(process.env.CLOOVIES_E2E_ROOT!, "Plain project");
+  mkdirSync(path);
+  writeFileSync(join(path, "notes.txt"), "Existing folder content");
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: "Add project", exact: true })
+    .first()
+    .click();
+  let dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Project folder").fill(path);
+  await dialog.getByLabel("Display name (optional)").fill("Plain project");
+  await dialog
+    .getByRole("button", { name: "Add project", exact: true })
+    .click();
+  await expect(dialog).toHaveCount(0);
+  const group = page
+    .locator(".project-group")
+    .filter({
+      has: page.getByRole("button", {
+        name: "Toggle Plain project",
+        exact: true,
+      }),
+    });
+  await expect(group.locator(".main-badge")).toHaveCount(0);
+  await expect(group.locator(".project-error")).toHaveCount(0);
+  await expect(
+    group.getByRole("button", {
+      name: "Create worktree in Plain project",
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await group
+    .getByRole("button", { name: "Toggle Plain project", exact: true })
+    .click({ button: "right" });
+  await expect(
+    page.getByRole("menuitem", { name: "Create worktree…", exact: true }),
+  ).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await group
+    .getByRole("button", { name: "New terminal in Plain project", exact: true })
+    .click();
+  dialog = page.getByRole("dialog");
+  await expect(
+    dialog.getByLabel("Project / worktree", { exact: true }),
+  ).toContainText("Plain project / project folder");
+  await dialog
+    .getByLabel("Terminal name", { exact: true })
+    .fill("Folder agent");
+  await dialog.getByLabel("Run", { exact: true }).selectOption("claude");
+  await dialog
+    .getByRole("button", { name: "Start terminal", exact: true })
+    .click();
+  const pane = page.getByRole("region", {
+    name: "Folder agent terminal",
+    exact: true,
+  });
+  await expect(
+    pane.getByRole("button", { name: "Send message", exact: true }),
+  ).toBeEnabled();
+  await send(page, "Folder agent", "Hello from a folder without Git");
+  await expect(pane.locator(".conversation-message.assistant")).toContainText(
+    "Hello from a folder without Git",
+  );
+  let state = await (await page.request.get("/api/workspace")).json();
+  const project = state.projects.find((p: any) => p.name === "Plain project");
+  const agent = state.terminals.find((t: any) => t.name === "Folder agent");
+  expect(project.git).toBe(false);
+  expect(existsSync(join(path, ".git"))).toBe(false);
+  const pid = tmux(
+    "display-message",
+    "-p",
+    "-t",
+    `=cw-${agent.id}:`,
+    "#{pane_pid}",
+  );
+  expect(
+    tmux(
+      "display-message",
+      "-p",
+      "-t",
+      `=cw-${agent.id}:`,
+      "#{pane_current_path}",
+    ).trim(),
+  ).toBe(project.path);
+  await page.reload();
+  await expect(pane.locator(".conversation-message.assistant")).toContainText(
+    "Hello from a folder without Git",
+  );
+  const rejected = await page.request.post(
+    `/api/workspace/projects/${project.id}/worktrees`,
+    { data: { name: "before-git", base: "HEAD" } },
+  );
+  expect(rejected.ok()).toBe(false);
+  expect(await rejected.text()).toContain("require Git");
+  execFileSync("git", ["init", "-b", "main", path]);
+  execFileSync("git", [
+    "-C",
+    path,
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@localhost",
+    "commit",
+    "--allow-empty",
+    "-m",
+    "Initial",
+  ]);
+  await expect(
+    group.getByRole("button", {
+      name: "Create worktree in Plain project",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(group.locator(".main-badge")).toHaveText("MAIN");
+  state = await (await page.request.get("/api/workspace")).json();
+  expect(state.projects.find((p: any) => p.id === project.id).git).toBe(true);
+  expect(
+    tmux("display-message", "-p", "-t", `=cw-${agent.id}:`, "#{pane_pid}"),
+  ).toBe(pid);
+});

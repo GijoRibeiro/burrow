@@ -93,8 +93,11 @@ export function renderProjectList(ctx: SidebarContext): void {
     const controls = el("div", "project-actions");
     controls.append(
       button(
-        `Create worktree in ${p.name}`,
-        () => ctx.newWorktree(p),
+        p.git === false
+          ? `New terminal in ${p.name}`
+          : `Create worktree in ${p.name}`,
+        () =>
+          p.git === false ? ctx.newTerminal(p.id, p.path) : ctx.newWorktree(p),
         "icon-button",
         "+",
       ),
@@ -105,7 +108,9 @@ export function renderProjectList(ctx: SidebarContext): void {
         x,
         y,
         [
-          { label: "Create worktree…", run: () => ctx.newWorktree(p) },
+          ...(p.git === false
+            ? []
+            : [{ label: "Create worktree…", run: () => ctx.newWorktree(p) }]),
           { label: "New terminal…", run: () => ctx.newTerminal(p.id, p.path) },
           {
             label: "Remove project from workspace…",
@@ -168,10 +173,14 @@ export function renderProjectList(ctx: SidebarContext): void {
           el(
             "span",
             "worktree-name",
-            w.main ? w.branch || "main checkout" : w.name,
+            p.git === false
+              ? w.name
+              : w.main
+                ? w.branch || "main checkout"
+                : w.name,
           ),
         );
-        if (w.main) {
+        if (w.main && p.git !== false) {
           const main = badge("MAIN", "main-badge");
           main.title = "Main project checkout";
           selectTree.append(main);
@@ -184,10 +193,14 @@ export function renderProjectList(ctx: SidebarContext): void {
             x,
             y,
             [
-              {
-                label: "Create child worktree…",
-                run: () => ctx.newWorktree(p, w.path),
-              },
+              ...(p.git === false
+                ? []
+                : [
+                    {
+                      label: "Create child worktree…",
+                      run: () => ctx.newWorktree(p, w.path),
+                    },
+                  ]),
               {
                 label: "New terminal…",
                 run: () => ctx.newTerminal(p.id, w.path),
@@ -275,7 +288,7 @@ export function renderProjectList(ctx: SidebarContext): void {
       el(
         "p",
         "sidebar-empty",
-        "Add a Git repository to bring its projects and worktrees together.",
+        "Add a folder to start working with terminals and agents.",
       ),
     );
   else if (!ctx.projects.childElementCount)
@@ -348,7 +361,11 @@ function sessionRow(
       { label: "Rename terminal…", run: () => ctx.renameTerminal(t.id) },
     ];
     if (t.program === "claude" || t.program === "codex") {
-      actions.push({ label: "Delegate task…", run: () => ctx.delegate(t.id) });
+      if (ctx.state.projects.find((p) => p.id === t.projectId)?.git !== false)
+        actions.push({
+          label: "Delegate task…",
+          run: () => ctx.delegate(t.id),
+        });
       actions.push({
         label: "Tasks and inbox…",
         run: () => ctx.coordination(t.taskId),

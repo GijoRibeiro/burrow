@@ -20,6 +20,7 @@ import (
 )
 
 type Project struct {
+	Git       bool       `json:"git"`
 	ID        string     `json:"id"`
 	Name      string     `json:"name"`
 	Path      string     `json:"path"`
@@ -230,7 +231,8 @@ func (m *Manager) Snapshot() State {
 	}
 	for i := range s.Projects {
 		p := &s.Projects[i]
-		p.Worktrees, err = listWorktrees(p.Path)
+		p.Worktrees, p.Git, err = projectCheckouts(p.Path)
+		p.Error = ""
 		for j := range p.Worktrees {
 			link := s.WorktreeLinks[p.Worktrees[j].Path]
 			p.Worktrees[j].ParentPath = link.ParentPath
@@ -255,20 +257,15 @@ func (m *Manager) AddProject(path, name string) (Project, error) {
 	if err != nil {
 		return Project{}, err
 	}
-	root, err := git(p, "rev-parse", "--show-toplevel")
+	trees, isGit, err := projectCheckouts(p)
 	if err != nil {
 		return Project{}, fmt.Errorf("could not open project folder %q: %w", p, err)
-	}
-	// Git lists the primary checkout first. This also handles submodules and
-	// repositories whose Git directory lives outside the checkout.
-	trees, err := listWorktrees(root)
-	if err != nil {
-		return Project{}, err
 	}
 	if len(trees) == 0 {
 		return Project{}, errors.New("repository has no working checkout")
 	}
-	root, err = canonical(trees[0].Path)
+	// Git lists the primary checkout first, including linked worktrees and submodules.
+	root, err := canonical(trees[0].Path)
 	if err != nil {
 		return Project{}, err
 	}
@@ -280,14 +277,14 @@ func (m *Manager) AddProject(path, name string) (Project, error) {
 	defer m.mu.Unlock()
 	for _, p := range m.state.Projects {
 		if p.Path == root {
-			p.Worktrees = trees
+			p.Worktrees, p.Git = trees, isGit
 			return p, nil
 		}
 	}
 	if name = strings.TrimSpace(name); name == "" {
 		name = filepath.Base(root)
 	}
-	p2 := Project{ID: id(), Name: name, Path: root, Worktrees: trees}
+	p2 := Project{ID: id(), Name: name, Path: root, Worktrees: trees, Git: isGit}
 	m.state.Projects = append(m.state.Projects, p2)
 	if err = m.save(); err != nil {
 		m.state.Projects = m.state.Projects[:len(m.state.Projects)-1]
@@ -295,6 +292,58 @@ func (m *Manager) AddProject(path, name string) (Project, error) {
 	}
 	return p2, nil
 }
+
+// Ordinary folders need no Git executable. A Git marker must still be handled
+// by Git so corrupt, inaccessible, or untrusted repositories are not silently
+// reclassified as plain folders. Discover ancestors as Git does for subfolders.
+func hasGitCheckout(path string) (bool, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false, err
+	}
+	if !info.IsDir() {
+		return false, errors.New("choose a folder, not a file")
+	}
+	for dir := path; ; dir = filepath.Dir(dir) {
+		if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
+			return true, nil
+		} else if !os.IsNotExist(err) {
+			return false, err
+		}
+		if filepath.Dir(dir) == dir {
+			break
+		}
+	}
+	// A bare repository has no working folder for terminals/worktrees.
+	if head, err := os.Stat(filepath.Join(path, "HEAD")); err == nil && !head.IsDir() {
+		if objects, err := os.Stat(filepath.Join(path, "objects")); err == nil && objects.IsDir() {
+			return false, errors.New("choose a working checkout rather than a bare Git repository")
+		}
+	}
+	return false, nil
+}
+func projectCheckouts(path string) ([]Worktree, bool, error) {
+	isGit, err := hasGitCheckout(path)
+	if err != nil {
+		return nil, false, err
+	}
+	if isGit {
+		trees, err := listWorktrees(path)
+		return trees, true, err
+	}
+	return []Worktree{{Path: path, Name: filepath.Base(path), Main: true}}, false, nil
+}
+func requireGitCheckout(path string) error {
+	isGit, err := hasGitCheckout(path)
+	if err != nil {
+		return err
+	}
+	if !isGit {
+		return errors.New("worktrees and delegated teams require Git; initialize a repository and make its first commit, or use terminals and agents directly in this folder")
+	}
+	return nil
+}
+
 func listWorktrees(root string) ([]Worktree, error) {
 	out, err := git(root, "worktree", "list", "--porcelain", "-z")
 	if err != nil {
@@ -329,6 +378,9 @@ func (m *Manager) createWorktree(projectID, name, base string, issue *linear.Wor
 func (m *Manager) createWorktreeLocked(projectID, name, base string, issue *linear.WorktreeIssue, parentPath string) (Worktree, error) {
 	p, err := m.project(projectID)
 	if err != nil {
+		return Worktree{}, err
+	}
+	if err = requireGitCheckout(p.Path); err != nil {
 		return Worktree{}, err
 	}
 	name = strings.TrimSpace(name)
