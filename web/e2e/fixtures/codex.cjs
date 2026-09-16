@@ -38,7 +38,7 @@ if (process.argv.some(arg => arg.includes('You are the head agent for a Burrow t
         name: `morning-${i + 1}`, title, program: 'codex', instructions: `TEAM_FIXTURE: implement ${title}, verify it, and report to the head.`,
       })),
     }));
-    process.stdout.write('Head: I have a plan for three independent workers. Please review it on the canvas.\r\n');
+    process.stdout.write('Head: Three independent workers are running. You can talk to them on the canvas.\r\n');
   }
   setInterval(() => {
     try {

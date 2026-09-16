@@ -146,6 +146,13 @@ func (m *Manager) createProgramTerminal(projectID, path, name, program, role, go
 	return t, nil
 }
 func (m *Manager) UpdateTerminal(id, action, name string) error {
+	if action == "remove" {
+		m.planMu.Lock()
+		defer m.planMu.Unlock()
+	}
+	return m.updateTerminal(id, action, name)
+}
+func (m *Manager) updateTerminal(id, action, name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	t, err := m.terminal(id)
@@ -177,12 +184,41 @@ func (m *Manager) UpdateTerminal(id, action, name string) error {
 		}
 	case "remove":
 		if _, err = m.tmux("has-session", "-t", "="+sessionName(id)); err == nil {
-			return errors.New("stop the terminal before removing it")
+			if _, err = m.tmux("kill-session", "-t", "="+sessionName(id)); err != nil {
+				return err
+			}
 		}
 	default:
 		return errors.New("unknown terminal action")
 	}
 	prev := m.state.Terminals
+	oldPlans, oldTasks := clonePlans(m.state.Plans), append([]Task{}, m.state.Tasks...)
+	if action == "remove" {
+		for i := range m.state.Tasks {
+			task := &m.state.Tasks[i]
+			if task.AgentID == id {
+				task.LaunchPending = false
+				if task.Status != "done" {
+					task.Status = "canceled"
+				}
+				for j := range m.state.Plans {
+					for k := range m.state.Plans[j].Items {
+						item := &m.state.Plans[j].Items[k]
+						if m.state.Plans[j].ID == task.PlanID && item.ID == task.PlanItemID {
+							item.Canceled = true
+							item.Error = ""
+						}
+					}
+				}
+			}
+		}
+		for i := range m.state.Plans {
+			if m.state.Plans[i].HeadID == id {
+				m.state.Plans[i].Status = "canceled"
+			}
+			settleRemovedAssignments(&m.state.Plans[i])
+		}
+	}
 	m.state.Terminals = []Terminal{}
 	for _, item := range prev {
 		if action == "remove" && item.HeadID == id {
@@ -198,6 +234,7 @@ func (m *Manager) UpdateTerminal(id, action, name string) error {
 	}
 	if err = m.save(); err != nil {
 		m.state.Terminals = prev
+		m.state.Plans, m.state.Tasks = oldPlans, oldTasks
 		return err
 	}
 	return nil

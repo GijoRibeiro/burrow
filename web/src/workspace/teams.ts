@@ -27,7 +27,7 @@ export function newHeadDialog(
   }
   dialog(
     "Meet your head agent",
-    "Start with a conversation. Your head can read Linear, suggest a team, and coordinate workers after you review its plan.",
+    "Tell your head what to work on. It can read Linear, create agents, and coordinate them immediately. You can discuss scope directly in its terminal.",
     [
       {
         name: "folder",
@@ -53,7 +53,7 @@ export function newHeadDialog(
         multiline: true,
         value: existing
           ? `Help me coordinate my existing agent ${existing.name}. It will be attached to you after startup. Briefly acknowledge, then wait for me to describe the work. Do not create workers yet.`
-          : "Check my assigned Linear tickets and help me choose three to work on today. Discuss the scope with me, then propose one worker per ticket and coordinate the team.",
+          : "Check my assigned Linear tickets, pick three independent tickets to work on today, and start one worker per ticket. Coordinate the team and keep me updated.",
       },
     ],
     "Start the conversation",
@@ -148,10 +148,10 @@ export function reviewTeamPlan(
   if (document.querySelector(".team-plan-dialog")) return;
   const d = el("dialog", "dialog team-plan-dialog"),
     head = state.terminals.find((t) => t.id === plan.headId);
-  d.setAttribute("aria-label", "Review team plan");
+  d.setAttribute("aria-label", "Team details");
   const heading = el("div", "team-review-heading");
   heading.append(
-    el("span", "team-eyebrow", "YOUR HEAD HAS A PLAN"),
+    el("span", "team-eyebrow", "YOUR TEAM"),
     el("h2", "", plan.title),
     el(
       "p",
@@ -180,21 +180,17 @@ export function reviewTeamPlan(
       el("p", "", item.instructions),
       el("code", "", `↳ ${item.name}`),
     );
-    if (item.taskId) row.append(el("small", "", "Worker created"));
+    if (item.canceled) row.append(el("small", "", "Removed"));
+    else if (item.taskId) row.append(el("small", "", "Worker created"));
     if (item.error) row.append(el("p", "form-error", item.error));
     items.append(row);
   }
   const error = el("p", "form-error");
   error.setAttribute("role", "alert");
   const actions = el("div", "dialog-actions"),
-    close = button(
-      "Close team plan",
-      () => d.close(),
-      "secondary",
-      "Keep discussing",
-    );
+    close = button("Close team plan", () => d.close(), "secondary", "Close");
   let busy = false;
-  const act = async (action: "approve" | "dismiss") => {
+  const act = async (action: "start" | "dismiss") => {
     if (busy) return;
     busy = true;
     error.textContent = "";
@@ -219,15 +215,15 @@ export function reviewTeamPlan(
   actions.append(close);
   if (plan.status === "proposed")
     actions.append(
-      button("Ask for a different plan", () => void act("dismiss"), "subtle"),
+      button("Cancel pending team", () => void act("dismiss"), "subtle"),
     );
   if (["proposed", "partial", "launching"].includes(plan.status))
     actions.append(
       button(
         plan.status === "proposed"
-          ? "Approve and start team"
+          ? "Start pending workers"
           : "Retry remaining workers",
-        () => void act("approve"),
+        () => void act("start"),
         "primary",
       ),
     );

@@ -1711,7 +1711,7 @@ test("optional child worktrees and agent coordination preserve the terminal canv
   ).toBeTruthy();
 });
 
-test("head proposes a team, waits for review, and coordinates workers on a persistent canvas", async ({
+test("head starts a team immediately and coordinates workers on a persistent canvas", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1600, height: 1050 });
@@ -1748,30 +1748,21 @@ test("head proposes a team, waits for review, and coordinates workers on a persi
   await form.getByLabel("Name", { exact: true }).fill("Morning head");
   await form.getByRole("button", { name: "Start the conversation" }).click();
   await expect(page.locator(".team-graph")).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Review plan A focused morning" }),
-  ).toBeVisible();
+  await expect
+    .poll(async () => {
+      const current = await (await page.request.get("/api/workspace")).json();
+      const head = current.terminals.find(
+        (t: any) => t.name === "Morning head",
+      );
+      return current.plans.find((p: any) => p.headId === head?.id)?.status;
+    })
+    .toBe("active");
   let state = await (await page.request.get("/api/workspace")).json();
   const head = state.terminals.find((t: any) => t.name === "Morning head");
-  expect(
-    state.terminals.filter((t: any) => t.projectId === project.id),
-  ).toHaveLength(1);
-  expect(
-    state.projects.find((p: any) => p.id === project.id).worktrees,
-  ).toHaveLength(1);
-  await expect(page.locator(".team-node.proposed")).toHaveCount(3);
-  await page
-    .getByRole("button", { name: "Review plan A focused morning" })
-    .click();
   await expect(
-    page.getByRole("dialog", { name: "Review team plan" }),
-  ).toContainText("Three independent tasks");
-  await page.getByRole("button", { name: "Approve and start team" }).click();
-  await expect(
-    page.getByRole("dialog", { name: "Review team plan" }),
-  ).not.toBeVisible();
+    page.getByRole("button", { name: "Approve and start team" }),
+  ).toHaveCount(0);
   await expect(page.locator(".team-node.proposed")).toHaveCount(0);
-  state = await (await page.request.get("/api/workspace")).json();
   const plan = state.plans.find((p: any) => p.headId === head.id);
   const tasks = state.tasks.filter((t: any) => t.planId === plan.id);
   expect(tasks).toHaveLength(3);
@@ -1790,8 +1781,8 @@ test("head proposes a team, waits for review, and coordinates workers on a persi
       ).length;
     })
     .toBeGreaterThanOrEqual(3);
-  // A repeated approval cannot duplicate terminals or worktrees.
-  await page.request.post(`/api/workspace/plans/${plan.id}/approve`, {
+  // A repeated start cannot duplicate terminals or worktrees.
+  await page.request.post(`/api/workspace/plans/${plan.id}/start`, {
     data: {},
   });
   const after = await (await page.request.get("/api/workspace")).json();
@@ -1876,6 +1867,51 @@ test("head proposes a team, waits for review, and coordinates workers on a persi
   expect(
     (await (await page.request.get("/api/workspace")).json()).projects.length,
   ).toBe(after.projects.length);
+  await page.getByRole("button", { name: "Team canvas", exact: true }).click();
+  const worker = tasks[0];
+  const survivor = tasks[1];
+  const survivorPID = tmux(
+    "display-message",
+    "-p",
+    "-t",
+    `=cw-${survivor.agentId}:`,
+    "#{pane_pid}",
+  );
+  await page.getByRole("button", { name: "Fit team to canvas" }).click();
+  const workerCard = page.locator(`[data-node-id="${worker.agentId}"]`);
+  await workerCard.click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Remove agent…" }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Remove", exact: true })
+    .click();
+  await expect(workerCard).toHaveCount(0);
+  expect(existsSync(worker.path)).toBe(true);
+  await page.reload();
+  await expect(workerCard).toHaveCount(0);
+  await expect(
+    page.locator(`[data-node-id="planned-${worker.planItemId}"]`),
+  ).toHaveCount(0);
+  const headCard = page.locator(`[data-node-id="${head.id}"]`);
+  await headCard.click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Remove agent…" }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Remove", exact: true })
+    .click();
+  await expect(headCard).toHaveCount(0);
+  await expect(
+    page.locator(`[data-node-id="${survivor.agentId}"]`),
+  ).toHaveCount(1);
+  expect(
+    tmux(
+      "display-message",
+      "-p",
+      "-t",
+      `=cw-${survivor.agentId}:`,
+      "#{pane_pid}",
+    ),
+  ).toBe(survivorPID);
 });
 
 test("canvas context menus attach existing agents without replacing their sessions", async ({
@@ -1964,7 +2000,7 @@ test("canvas context menus attach existing agents without replacing their sessio
   );
   expect(
     state.projects.find((p: any) => p.id === project.id).worktrees,
-  ).toHaveLength(1);
+  ).toHaveLength(4);
   expect(
     tmux("display-message", "-p", "-t", `=cw-${agent.id}:`, "#{pane_pid}"),
   ).toBe(pid);
@@ -2010,13 +2046,6 @@ test("canvas context menus attach existing agents without replacing their sessio
     tmux("display-message", "-p", "-t", `=cw-${agent.id}:`, "#{pane_pid}"),
   ).toBe(pid);
   await card.click({ button: "right" });
-  await page.getByRole("menuitem", { name: "Terminate agent…" }).click();
-  await page
-    .getByRole("dialog")
-    .getByRole("button", { name: "Stop terminal", exact: true })
-    .click();
-  await expect(card).toContainText("Agent stopped");
-  await card.click({ button: "right" });
   await page.getByRole("menuitem", { name: "Remove agent…" }).click();
   await page
     .getByRole("dialog")
@@ -2025,11 +2054,9 @@ test("canvas context menus attach existing agents without replacing their sessio
   await expect(card).toHaveCount(0);
   await page.getByLabel("Team shown on canvas").selectOption(head.id);
   await page.locator(`[data-node-id="${head.id}"]`).click();
-  await page
-    .getByRole("button", { name: "Review head plan", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Team details", exact: true }).click();
   await expect(
-    page.getByRole("dialog", { name: "Review team plan" }),
+    page.getByRole("dialog", { name: "Team details" }),
   ).toBeVisible();
 });
 
@@ -2106,4 +2133,68 @@ test("message composers grow for multiline and wrapped drafts, then shrink after
   await expect
     .poll(() => input.evaluate((el) => el.clientHeight))
     .toBeLessThanOrEqual(initial + 2);
+});
+
+test("chat hyperlinks open separately and code stays literal", async ({
+  page,
+  context,
+}) => {
+  const project = await (
+    await page.request.post("/api/workspace/projects", {
+      data: {
+        path: join(process.env.CLOOVIES_E2E_ROOT!, "Newbit"),
+        name: "Newbit",
+      },
+    })
+  ).json();
+  const agent = await (
+    await page.request.post("/api/workspace/terminals", {
+      data: {
+        projectId: project.id,
+        path: project.path,
+        name: "Link reader",
+        program: "claude",
+      },
+    })
+  ).json();
+  await page.goto("/");
+  await page.getByRole("button", { name: "Team canvas", exact: true }).click();
+  await page.getByLabel("Team shown on canvas").selectOption("");
+  await page
+    .getByRole("button", { name: "Open Link reader on canvas" })
+    .click();
+  const pane = page.getByRole("region", {
+    name: "Link reader terminal",
+    exact: true,
+  });
+  await pane.getByRole("button", { name: "Agent view", exact: true }).click();
+  await expect(
+    pane.getByRole("button", { name: "Send message", exact: true }),
+  ).toBeEnabled();
+  await send(
+    page,
+    "Link reader",
+    "Open [preview](http://localhost:4999/demo?q=1&v=2) and https://example.com/docs.\n```sh\ncurl https://example.com/code\n```",
+  );
+  const message = pane.locator(".conversation-message.assistant").last();
+  await expect(message.getByRole("link")).toHaveCount(2);
+  await expect(message.locator(".message-code a")).toHaveCount(0);
+  await context.route("http://localhost:4999/**", (route) =>
+    route.fulfill({
+      contentType: "text/html",
+      body: "<h1>Linked preview</h1>",
+    }),
+  );
+  const popupPromise = page.waitForEvent("popup");
+  await message.getByRole("link", { name: "preview", exact: true }).click();
+  const popup = await popupPromise;
+  await expect(
+    popup.getByRole("heading", { name: "Linked preview" }),
+  ).toBeVisible();
+  expect(popup.url()).toBe("http://localhost:4999/demo?q=1&v=2");
+  expect(new URL(page.url()).port).toBe("4337");
+  await popup.close();
+  await page.request.patch(`/api/workspace/terminals/${agent.id}`, {
+    data: { action: "remove" },
+  });
 });

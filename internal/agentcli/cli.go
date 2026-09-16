@@ -22,8 +22,8 @@ import (
 const Help = `burrow — workspace agent coordination (JSON output)
   linear [search]                        Your open Linear tickets, or search
   issue <identifier>                     Read full Linear ticket context
-  plans                                  Read your proposed/approved team plans
-  propose <JSON|->                       Propose workers for user review (head only)
+  plans                                  Read your teams and launch status
+  propose <JSON|->                       Create and start workers immediately (head only)
     JSON: {"title":"...","summary":"...","items":[{"issueId":"ENG-1","name":"eng-1","program":"codex","title":"...","instructions":"..."}]}
   send user <message>                    Send an update to the user in Tasks and inbox
   team                                   List your head and teammates

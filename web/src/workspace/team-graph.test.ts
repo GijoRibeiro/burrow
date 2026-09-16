@@ -42,7 +42,7 @@ describe("team relationships", () => {
     expect(layout.head.y).toBe((layout.worker.y + layout["planned-two"].y) / 2);
     expect(layout.solo.y).toBeGreaterThan(layout["planned-two"].y);
     state.terminals = state.terminals.filter((t) => t.id !== "head");
-    expect(Object.keys(arrangeTeam(teamNodes(state)))).toHaveLength(3);
+    expect(Object.keys(arrangeTeam(teamNodes(state)))).toHaveLength(2);
   });
   it("handles old cyclic metadata without recursion or losing cards", () => {
     const layout = arrangeTeam([
@@ -91,4 +91,27 @@ it("opens canvas actions without capturing macOS Control-click as a drag", () =>
     }),
   );
   expect(menu).toHaveBeenCalledWith("solo", 12, 24, expect.any(Function));
+});
+
+it("does not recreate removed workers from their task or canceled assignment", () => {
+  const state = {
+    projects: [],
+    terminals: [{ id: "head", role: "head", program: "claude" }],
+    tasks: [
+      { id: "task", agentId: "removed", planId: "plan", planItemId: "one" },
+    ],
+    plans: [
+      {
+        id: "plan",
+        headId: "head",
+        status: "partial",
+        items: [
+          { id: "one" },
+          { id: "two", canceled: true },
+          { id: "three", taskId: "old-task" },
+        ],
+      },
+    ],
+  } as unknown as Workspace;
+  expect(teamNodes(state).map((n) => n.id)).toEqual(["head"]);
 });

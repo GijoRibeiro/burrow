@@ -112,9 +112,6 @@ func TestTerminalLifecycleAndReload(t *testing.T) {
 	if err = m.RemoveProject(p.ID); err == nil {
 		t.Fatal("removed project with terminal")
 	}
-	if err = m.UpdateTerminal(term.ID, "remove", ""); err == nil {
-		t.Fatal("removed live terminal")
-	}
 	if err = m.UpdateTerminal(term.ID, "restart", ""); err == nil {
 		t.Fatal("restarted live terminal")
 	}

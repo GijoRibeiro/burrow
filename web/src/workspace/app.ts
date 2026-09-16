@@ -449,6 +449,12 @@ class WorkspaceApp {
     // A mutation must await a fresh snapshot even if a periodic poll is in flight.
     this.state = await api<Workspace>();
     this.signature = JSON.stringify(this.state);
+    const allowed = new Set(this.state.terminals.map((t) => t.id));
+    for (const id of ids(this.tree))
+      if (!allowed.has(id)) {
+        this.tree = remove(this.tree, id);
+        delete this.drafts[id];
+      }
     this.ensureAppearances();
     this.persist();
     this.renderSidebar();
@@ -598,15 +604,11 @@ class WorkspaceApp {
         t.role === "head"
           ? [...(this.state.plans || [])]
               .reverse()
-              .find(
-                (p) =>
-                  p.headId === t.id &&
-                  ["proposed", "partial", "launching"].includes(p.status),
-              )
+              .find((p) => p.headId === t.id && p.status !== "canceled")
           : undefined;
       pane.setTeamPlan(
         plan?.title || "",
-        plan?.items.length || 0,
+        plan?.items.filter((item) => !item.canceled).length || 0,
         plan ? () => this.reviewPlan(plan) : undefined,
       );
     }
@@ -841,7 +843,42 @@ class WorkspaceApp {
     restore: () => void,
   ): void {
     const agent = this.state.terminals.find((t) => t.id === id);
-    if (!agent) return;
+    if (!agent) {
+      const plan = this.state.plans?.find((p) =>
+        p.items.some((item) => `planned-${item.id}` === id),
+      );
+      const item = plan?.items.find((item) => `planned-${item.id}` === id);
+      if (!plan || !item) return;
+      contextMenu(
+        item.title,
+        x,
+        y,
+        [
+          { label: "Team details…", run: () => this.reviewPlan(plan) },
+          {
+            label: "Remove agent…",
+            danger: true,
+            run: () =>
+              dialog(
+                "Remove agent?",
+                `Cancel ${item.title}. If it has just started, its process will be stopped. Its checkout stays on disk.`,
+                [],
+                "Remove",
+                async () => {
+                  await this.mutate(
+                    `/plans/${plan.id}/items/${item.id}`,
+                    "DELETE",
+                  );
+                },
+                true,
+              ),
+          },
+        ],
+        restore,
+        terminalColor(plan.headId),
+      );
+      return;
+    }
     const actions: MenuAction[] = [
       { label: "Open conversation", run: () => this.selectTeamAgent(id) },
       { label: "Open in terminals", run: () => this.openInTerminals(id) },
@@ -858,14 +895,10 @@ class WorkspaceApp {
       });
       const plan = [...(this.state.plans || [])]
         .reverse()
-        .find(
-          (p) =>
-            p.headId === id &&
-            ["proposed", "partial", "launching"].includes(p.status),
-        );
+        .find((p) => p.headId === id && p.status !== "canceled");
       if (plan)
         actions.push({
-          label: "Review team plan…",
+          label: "Team details…",
           run: () => this.reviewPlan(plan),
         });
     } else if (!agent.taskId) {
@@ -890,27 +923,32 @@ class WorkspaceApp {
     }
     if (agent.status !== "running")
       actions.push({ label: "Start agent", run: () => this.restart(id) });
-    actions.push(
-      agent.status === "stopped"
-        ? {
-            label: "Remove agent…",
-            danger: true,
-            run: () =>
-              dialog(
-                "Remove agent?",
-                `Remove ${agent.name} from the workspace. Its checkout stays on disk.`,
-                [],
-                "Remove",
-                async () => {
-                  await this.mutate(`/terminals/${id}`, "PATCH", {
-                    action: "remove",
-                  });
-                },
-                true,
-              ),
-          }
-        : { label: "Terminate agent…", danger: true, run: () => this.stop(id) },
-    );
+    if (agent.status !== "stopped")
+      actions.push({
+        label: "Terminate agent…",
+        danger: true,
+        run: () => this.stop(id),
+      });
+    actions.push({
+      label: "Remove agent…",
+      danger: true,
+      run: () =>
+        dialog(
+          "Remove agent?",
+          `Remove ${agent.name} and stop its process. Its checkout stays on disk.${agent.role === "head" ? " Existing workers keep running independently." : ""}`,
+          [],
+          "Remove",
+          async () => {
+            await this.mutate(`/terminals/${id}`, "PATCH", {
+              action: "remove",
+            });
+            this.tree = remove(this.tree, id);
+            delete this.drafts[id];
+            this.change();
+          },
+          true,
+        ),
+    });
     contextMenu(
       agent.name,
       x,
@@ -997,7 +1035,10 @@ class WorkspaceApp {
     reviewTeamPlan(plan, this.state, async (updated) => {
       await this.reloadState();
       for (const task of this.state.tasks || []) {
-        if (task.planId === updated.id)
+        if (
+          task.planId === updated.id &&
+          this.state.terminals.some((t) => t.id === task.agentId)
+        )
           this.tree = insert(this.tree, task.agentId, this.active, "row");
       }
       this.persist();

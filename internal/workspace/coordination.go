@@ -87,7 +87,7 @@ func (m *Manager) delegate(v DelegateRequest, planID, itemID string, issue *line
 		return Task{}, err
 	}
 	if parent.Role == "head" && planID == "" {
-		return Task{}, errors.New("head agents propose a plan first; workers start after the user approves it on the canvas")
+		return Task{}, errors.New("head agents propose a plan first; the propose command starts the workers immediately")
 	}
 	if planID != "" {
 		for _, existing := range m.state.Tasks {

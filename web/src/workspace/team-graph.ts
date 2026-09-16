@@ -43,12 +43,16 @@ export function teamNodes(state: Workspace): GraphNode[] {
       };
     });
   for (const plan of state.plans || []) {
-    if (plan.status === "canceled") continue;
+    if (
+      plan.status === "canceled" ||
+      !state.terminals.some((t) => t.id === plan.headId)
+    )
+      continue;
     for (const item of plan.items) {
       const task = state.tasks?.find(
         (t) => t.planId === plan.id && t.planItemId === item.id,
       );
-      if (task && nodes.some((n) => n.id === task.agentId)) continue;
+      if (item.canceled || item.taskId || task) continue;
       nodes.push({ id: `planned-${item.id}`, parent: plan.headId, plan, item });
     }
   }
@@ -349,7 +353,7 @@ export class TeamGraph {
           `Review plan ${plan.title}`,
           () => this.ctx.review(plan),
           "team-plan-notice",
-          `${plan.status === "proposed" ? "✦ Plan ready" : "↗ Continue launch"}  ·  ${plan.title}  ·  ${plan.items.length} workers  →`,
+          `${plan.status === "proposed" ? "↗ Pending launch" : "↗ Launch status"}  ·  ${plan.title}  ·  ${plan.items.length} workers  →`,
         ),
       );
     this.position();
@@ -402,7 +406,7 @@ export class TeamGraph {
         node.session?.role === "head"
           ? "HEAD AGENT"
           : node.item
-            ? "PROPOSED WORKER"
+            ? "STARTING WORKER"
             : node.task || node.session?.headId
               ? "WORKER"
               : "INDEPENDENT",
@@ -430,7 +434,7 @@ export class TeamGraph {
           "Terminal";
     open.append(el("span", "team-node-detail", detail));
     let status = node.item
-      ? "Awaiting your approval"
+      ? "Starting…"
       : node.task?.integratedCommit
         ? "Integrated"
         : node.task?.status === "waiting"
@@ -454,7 +458,7 @@ export class TeamGraph {
     );
     open.append(foot);
     card.append(open);
-    if (node.session) {
+    {
       open.setAttribute("aria-haspopup", "menu");
       const menu = (x: number, y: number) =>
         this.ctx.menu(node.id, x, y, () => {
