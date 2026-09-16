@@ -14,6 +14,7 @@ export interface TeamGraphContext {
   color(id: string): string;
   creature(id: string): string;
   select(id: string): void;
+  menu(id: string, x: number, y: number, restore: () => void): void;
   newHead(): void;
   review(plan: TeamPlan): void;
   task(id: string): void;
@@ -35,7 +36,7 @@ export function teamNodes(state: Workspace): GraphNode[] {
         id: session.id,
         session,
         task,
-        parent: task?.parentId,
+        parent: session.headId || task?.parentId,
         plan: [...(state.plans || [])]
           .reverse()
           .find((p) => p.headId === session.id && p.status !== "canceled"),
@@ -402,7 +403,7 @@ export class TeamGraph {
           ? "HEAD AGENT"
           : node.item
             ? "PROPOSED WORKER"
-            : node.task
+            : node.task || node.session?.headId
               ? "WORKER"
               : "INDEPENDENT",
       ),
@@ -453,6 +454,30 @@ export class TeamGraph {
     );
     open.append(foot);
     card.append(open);
+    if (node.session) {
+      open.setAttribute("aria-haspopup", "menu");
+      const menu = (x: number, y: number) =>
+        this.ctx.menu(node.id, x, y, () => {
+          this.cards
+            .querySelector<HTMLButtonElement>(
+              `[data-node-id="${node.id}"] .team-node-open`,
+            )
+            ?.focus({ preventScroll: true });
+        });
+      card.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        menu(e.clientX, e.clientY);
+      });
+      open.addEventListener("keydown", (e) => {
+        if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+          e.preventDefault();
+          e.stopPropagation();
+          const b = open.getBoundingClientRect();
+          menu(b.left + 12, b.bottom);
+        }
+      });
+    }
     if (node.task?.status === "waiting" || node.task?.status === "done")
       card.append(
         button(
@@ -516,6 +541,9 @@ export class TeamGraph {
     }
   }
   private startDrag(e: PointerEvent): void {
+    // macOS Control-click opens the context menu; capturing it would retarget
+    // WebKit's contextmenu event to the empty canvas.
+    if (e.ctrlKey && e.button === 0) return;
     if (e.button !== 0 && e.button !== 1) return;
     const target = e.target as HTMLElement;
     if (target.closest(".team-task-link, .team-empty")) return;

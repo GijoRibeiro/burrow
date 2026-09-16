@@ -1,6 +1,6 @@
 import { button, el } from "./dom";
 
-type MenuAction = { label: string; run(): void; danger?: boolean };
+export type MenuAction = { label: string; run(): void; danger?: boolean };
 let dismiss: (() => void) | undefined;
 
 export function contextMenu(

@@ -1,3 +1,4 @@
+import { contextMenu, type MenuAction } from "./context-menu";
 import { TeamGraph } from "./team-graph";
 import { newHeadDialog, reviewTeamPlan, linearConnectionDialog } from "./teams";
 import {
@@ -96,6 +97,7 @@ class WorkspaceApp {
       creature: (id) => this.appearances[id]?.creature || defaultCreature(id),
       select: (id) => this.selectTeamAgent(id),
       newHead: () => this.newHead(),
+      menu: (id, x, y, restore) => this.agentMenu(id, x, y, restore),
       review: (plan) => this.reviewPlan(plan),
       task: (id) => coordinationDialog(this.coordinationContext(), id),
     });
@@ -592,6 +594,21 @@ class WorkspaceApp {
         this.panes.set(t.id, pane);
       }
       pane.update(t);
+      const plan =
+        t.role === "head"
+          ? [...(this.state.plans || [])]
+              .reverse()
+              .find(
+                (p) =>
+                  p.headId === t.id &&
+                  ["proposed", "partial", "launching"].includes(p.status),
+              )
+          : undefined;
+      pane.setTeamPlan(
+        plan?.title || "",
+        plan?.items.length || 0,
+        plan ? () => this.reviewPlan(plan) : undefined,
+      );
     }
     if (!visible.has(this.active || ""))
       this.active = ids(this.tree)[0] || null;
@@ -817,14 +834,164 @@ class WorkspaceApp {
     this.view = "terminals";
     this.show(id);
   }
-  private newHead(): void {
-    newHeadDialog(this.state, async (head) => {
-      await this.reloadState();
-      this.tree = insert(this.tree, head.id, this.active, "row");
-      this.view = "team";
-      this.selectTeamAgent(head.id);
-      requestAnimationFrame(() => this.teamGraph.fit());
-    });
+  private agentMenu(
+    id: string,
+    x: number,
+    y: number,
+    restore: () => void,
+  ): void {
+    const agent = this.state.terminals.find((t) => t.id === id);
+    if (!agent) return;
+    const actions: MenuAction[] = [
+      { label: "Open conversation", run: () => this.selectTeamAgent(id) },
+      { label: "Open in terminals", run: () => this.openInTerminals(id) },
+      { label: "Rename agent…", run: () => this.rename(id) },
+      {
+        label: "Tasks and inbox…",
+        run: () => coordinationDialog(this.coordinationContext(), agent.taskId),
+      },
+    ];
+    if (agent.role === "head") {
+      actions.push({
+        label: "Attach existing agent…",
+        run: () => this.attachAgentDialog(undefined, id),
+      });
+      const plan = [...(this.state.plans || [])]
+        .reverse()
+        .find(
+          (p) =>
+            p.headId === id &&
+            ["proposed", "partial", "launching"].includes(p.status),
+        );
+      if (plan)
+        actions.push({
+          label: "Review team plan…",
+          run: () => this.reviewPlan(plan),
+        });
+    } else if (!agent.taskId) {
+      actions.push({
+        label: agent.headId ? "Change head…" : "Attach to a head…",
+        run: () => this.attachAgentDialog(id),
+      });
+      if (agent.headId)
+        actions.push({
+          label: "Detach from head",
+          run: () => {
+            void this.mutate(`/terminals/${id}/head`, "PATCH", {
+              headId: "",
+            }).catch((e) => this.error(e));
+          },
+        });
+      else
+        actions.push({
+          label: "Create a head for this agent…",
+          run: () => this.newHead(id),
+        });
+    }
+    if (agent.status !== "running")
+      actions.push({ label: "Start agent", run: () => this.restart(id) });
+    actions.push(
+      agent.status === "stopped"
+        ? {
+            label: "Remove agent…",
+            danger: true,
+            run: () =>
+              dialog(
+                "Remove agent?",
+                `Remove ${agent.name} from the workspace. Its checkout stays on disk.`,
+                [],
+                "Remove",
+                async () => {
+                  await this.mutate(`/terminals/${id}`, "PATCH", {
+                    action: "remove",
+                  });
+                },
+                true,
+              ),
+          }
+        : { label: "Terminate agent…", danger: true, run: () => this.stop(id) },
+    );
+    contextMenu(
+      agent.name,
+      x,
+      y,
+      actions,
+      restore,
+      this.appearances[id]?.color || terminalColor(id),
+    );
+  }
+  private attachAgentDialog(agentId?: string, headId?: string): void {
+    const anchor = this.state.terminals.find(
+      (t) => t.id === (agentId || headId),
+    );
+    if (!anchor) return;
+    const heads = this.state.terminals.filter(
+      (t) => t.role === "head" && t.projectId === anchor.projectId,
+    );
+    const agents = this.state.terminals.filter(
+      (t) =>
+        t.role !== "head" &&
+        !t.taskId &&
+        ["claude", "codex"].includes(t.program || "") &&
+        t.projectId === anchor.projectId,
+    );
+    if (!heads.length) {
+      this.newHead(agentId);
+      return;
+    }
+    if (!agents.length) {
+      this.error("There are no independent agents in this project to attach.");
+      return;
+    }
+    dialog(
+      "Attach agent to a head",
+      "Keep the existing terminal and checkout. After attaching, we’ll prepare a short connection message in the agent’s composer. Send it when you’re ready so the agent starts checking its team inbox.",
+      [
+        {
+          name: "agent",
+          label: "Existing agent",
+          value: agentId || agents[0].id,
+          options: agents.map((t) => ({ value: t.id, label: t.name })),
+        },
+        {
+          name: "head",
+          label: "Head agent",
+          value: headId || anchor.headId || heads[0].id,
+          options: heads.map((t) => ({ value: t.id, label: t.name })),
+        },
+      ],
+      "Attach and prepare message",
+      async (values) => {
+        await this.attachAgent(values.agent, values.head);
+      },
+    );
+  }
+  private async attachAgent(agentId: string, headId: string): Promise<void> {
+    await this.mutate(`/terminals/${agentId}/head`, "PATCH", { headId });
+    const data = await api<{ cli: string }>("/coordination");
+    const quote = (text: string) => "'" + text.replaceAll("'", "'\"'\"'") + "'";
+    const prompt = `You are now attached to a Burrow head. Keep your existing work and checkout. Use ${quote(data.cli)} --agent ${quote(agentId)} help, team, and inbox now. Acknowledge handled messages with ack <message-id>. Check inbox between work steps and send parent <message> for questions and progress. Do not restart completed work. Read team to discover your current head after any reassignment.`;
+    this.view = "team";
+    this.selectTeamAgent(agentId);
+    this.panes.get(agentId)?.prepareMessage(prompt);
+    requestAnimationFrame(() => this.teamGraph.fit());
+  }
+  private newHead(attachId?: string): void {
+    newHeadDialog(
+      this.state,
+      async (head) => {
+        await this.reloadState();
+        if (attachId) {
+          await this.attachAgent(attachId, head.id);
+          return;
+        }
+        this.tree = insert(this.tree, head.id, this.active, "row");
+        this.view = "team";
+        this.selectTeamAgent(head.id);
+        requestAnimationFrame(() => this.teamGraph.fit());
+      },
+      this.state.terminals.find((t) => t.id === attachId),
+    );
   }
   private reviewPlan(plan: TeamPlan): void {
     reviewTeamPlan(plan, this.state, async (updated) => {

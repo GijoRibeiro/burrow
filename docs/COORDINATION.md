@@ -28,12 +28,21 @@ for different projects. For dependent work, let the head propose the next batch
 after you integrate its prerequisites. The head is instructed to coordinate and
 leave implementation to isolated workers.
 
+The head acknowledges requests before running tools. For a concrete request such
+as “Create agents for SMOKE-1 and SMOKE-2,” it reads the ticket context and proposes
+a plan. It returns control after proposing instead of polling while you review.
+The plan can be reviewed directly inside the head's terminal or on the canvas.
+
 The head receives worker questions and status updates through its durable inbox.
-It is instructed to keep a `wait 60` loop while supervising, reply to workers,
-acknowledge messages, and summarize results to you. This is a real CLI agent
-following instructions, not a guaranteed always-on scheduler: if it stops or
-returns to its prompt, ask it to resume supervision. Closing the app preserves
-processes, but coordination requests need the local app server to be running.
+Ask it to supervise an approved team: it checks messages, answers workers, and
+uses at most one empty `wait 60` before returning with an update. It is a CLI
+agent, not an always-on scheduler. Closing the app preserves processes, but
+coordination requests need the local app server to be running.
+
+After a minute without new conversation or tool progress, the quiet view offers
+the full terminal and an **Interrupt response** action. Provider errors remain
+visible even when conversation history is available. Recent Claude live session
+status clears stale thinking animations after a turn is interrupted.
 
 **Team canvas** and **Terminals** are two views of the same sessions. The canvas
 supports dragging cards, panning, zooming, fitting, arranging, and choosing one
@@ -52,6 +61,23 @@ heads do not automatically merge changes, terminate agents, or update Linear.
 
 **Active agents only** hides sidebar projects without a running Claude or Codex
 process. It does not remove projects, stop shells, or alter your terminal layout.
+
+## Canvas actions and existing agents
+
+Right-click an agent card, or focus it and press Shift+F10, to open its actions:
+conversation, terminal view, rename, tasks/inbox, and terminate or remove.
+Heads also offer **Attach existing agent** and **Review team plan**.
+
+For an independent agent, choose **Attach to a head** or **Create a head for this
+agent**. Both agents must belong to the same project. Attachment preserves the
+existing process, draft, checkout, and uncommitted work. The canvas draws the new
+relationship immediately. A connection message is prepared in the existing
+agent's composer; send it when ready so it starts reading its inbox and reporting
+to the head. The app does not inject text into a busy agent. The `team` command
+shows its current head and teammates; `send parent` resolves its attached head.
+
+An attached independent agent can change heads or detach. Delegated workers keep
+their task's integration parent; attachment does not reparent their Git history.
 
 ## Child worktrees
 
@@ -92,6 +118,7 @@ burrow plans
 burrow propose '{"title":"Morning work","summary":"Independent fixes","items":[{"issueId":"ENG-123","name":"eng-123-menu","program":"codex","title":"Fix menu","instructions":"Implement, test, and commit the menu fix."}]}'
 burrow send user 'The workers are running; I am checking their progress.'
 burrow agents
+burrow team
 burrow tasks
 burrow task
 burrow inbox
@@ -106,3 +133,12 @@ burrow delegate api-child codex 'Add API tests' 'Cover successful and failing re
 For long messages, `send ... -`, `status ... -`, and the final `delegate` argument `-` read stdin. Commands print JSON. The app must be running for the CLI to work; messages and tasks remain on disk if it closes. Reopen the app and retry after a connection error. The launcher is refreshed on startup, so it follows the installed server across updates.
 
 The local server validates an agent-specific token for agent API calls and derives the sender from that identity. Tokens live in the owner-readable workspace state, are not printed by the CLI, and are excluded from browser snapshots. This prevents accidental sender mix-ups; it is not a sandbox between agents that have broad access to the same user's files. Task conversations are retained locally with workspace metadata, and no cloud coordination service is used.
+
+### Optional live provider smoke test
+
+`head_live_test.go` is skipped by default. To run it, set `BURROW_SMOKE_BINARY`
+to a built workspace executable and `BURROW_SMOKE_REPO` to a disposable, trusted
+Git checkout. It uses the local Claude account with fake Linear tickets and
+local Codex fixtures. It sends a conversational ticket request, waits for a
+reviewable plan, approves it, and verifies worker terminals and parent messages.
+Do not point it at a real project. Normal Go and browser tests use fixtures only.

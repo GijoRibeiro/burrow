@@ -185,6 +185,9 @@ func (m *Manager) UpdateTerminal(id, action, name string) error {
 	prev := m.state.Terminals
 	m.state.Terminals = []Terminal{}
 	for _, item := range prev {
+		if action == "remove" && item.HeadID == id {
+			item.HeadID = ""
+		}
 		if item.ID == id {
 			if action == "remove" {
 				continue

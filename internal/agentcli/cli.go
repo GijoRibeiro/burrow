@@ -26,6 +26,7 @@ const Help = `burrow — workspace agent coordination (JSON output)
   propose <JSON|->                       Propose workers for user review (head only)
     JSON: {"title":"...","summary":"...","items":[{"issueId":"ENG-1","name":"eng-1","program":"codex","title":"...","instructions":"..."}]}
   send user <message>                    Send an update to the user in Tasks and inbox
+  team                                   List your head and teammates
   agents                                 List agents and IDs
   tasks                                  List your assigned/delegated tasks
   task [task-id]                         Read task context
@@ -103,7 +104,7 @@ func Run(args []string, out io.Writer) error {
 		return string(data), e
 	}
 	switch args[0] {
-	case "agents", "tasks", "inbox", "plans":
+	case "agents", "tasks", "inbox", "plans", "team":
 		if err := need(1); err != nil {
 			return err
 		}

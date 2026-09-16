@@ -79,6 +79,9 @@ export class TerminalPane {
       session.id,
       () => this.setView("terminal"),
       actions.startAgent,
+      () => {
+        this.input("\x1b");
+      },
     );
     this.saveDraft = actions.draft;
     this.message.value = draft;
@@ -482,6 +485,29 @@ export class TerminalPane {
       this.saveDraft("");
     }
     this.focus();
+  }
+  setTeamPlan(title: string, count: number, review?: () => void): void {
+    let notice =
+      this.element.querySelector<HTMLButtonElement>(".head-plan-notice");
+    if (!review) {
+      notice?.remove();
+      return;
+    }
+    if (!notice) {
+      notice = button("Review head plan", () => {}, "head-plan-notice");
+      this.element.querySelector(".pane-header")?.after(notice);
+    }
+    notice.textContent = `Plan ready · ${count} agents · ${title} → Review`;
+    notice.onclick = review;
+  }
+  prepareMessage(text: string): void {
+    // Preserve an unfinished user draft and append the connection instructions.
+    this.message.value = this.message.value.trim()
+      ? `${this.message.value}\n\n${text}`
+      : text;
+    this.saveDraft(this.message.value);
+    this.setView(this.session.program === "codex" ? "terminal" : "agent");
+    this.message.focus();
   }
   fit(): void {
     cancelAnimationFrame(this.frame);

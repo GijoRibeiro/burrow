@@ -23,6 +23,7 @@ export interface Project {
   error?: string;
 }
 export interface Session {
+  headId?: string;
   role?: "head";
   goal?: string;
   taskId?: string;
