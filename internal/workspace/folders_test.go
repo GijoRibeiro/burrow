@@ -132,3 +132,42 @@ func TestNestedGitFolderStillResolvesToExistingProject(t *testing.T) {
 		t.Fatal(same, err)
 	}
 }
+
+func TestAgentsCanWorkInSubfoldersAndKeepCheckoutLifecycleSafe(t *testing.T) {
+	m, p, _ := coordinationManager(t)
+	tree, err := m.CreateWorktree(p.ID, "nested-folder", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	folder := filepath.Join(tree.Path, "src")
+	if err = os.Mkdir(folder, 0755); err != nil {
+		t.Fatal(err)
+	}
+	term, err := m.CreateProgramTerminal(p.ID, folder, "Subfolder agent", "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cwd, err := m.tmux("display-message", "-p", "-t", "="+sessionName(term.ID)+":", "#{pane_current_path}")
+	if err != nil || cwd != folder {
+		t.Fatalf("folder: %s %v", cwd, err)
+	}
+	if err = m.RemoveWorktree(p.ID, tree.Path); err == nil || !strings.Contains(err.Error(), "stop this worktree") {
+		t.Fatalf("removed checkout beneath agent: %v", err)
+	}
+	child, err := m.createWorktree(p.ID, "nested-child", "HEAD", nil, folder)
+	if err != nil || child.ParentPath != tree.Path {
+		t.Fatalf("subfolder delegation parent: %+v %v", child, err)
+	}
+	alias := filepath.Join(tree.Path, "outside")
+	if err = os.Symlink(t.TempDir(), alias); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = m.CreateTerminal(p.ID, alias, "Escape"); err == nil {
+		t.Fatal("accepted symlink outside project")
+	}
+	file := filepath.Join(folder, "file")
+	os.WriteFile(file, []byte("keep"), 0600)
+	if _, err = m.CreateTerminal(p.ID, file, "File"); err == nil {
+		t.Fatal("accepted regular file")
+	}
+}

@@ -62,6 +62,7 @@ type State struct {
 	TmuxAvailable  bool                            `json:"tmuxAvailable"`
 }
 type Manager struct {
+	github     githubState
 	planMu     sync.Mutex
 	runtimeURL string
 	cliPath    string
@@ -152,6 +153,11 @@ func canonical(path string) (string, error) {
 		return "", err
 	}
 	return filepath.EvalSymlinks(p)
+}
+
+func folderWithin(path, root string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }
 
 // save is atomic; callers restore in-memory state on failure.
@@ -405,14 +411,17 @@ func (m *Manager) createWorktreeLocked(projectID, name, base string, issue *line
 			return Worktree{}, e
 		}
 		found := false
+		checkout := ""
 		for _, tree := range trees {
-			if tree.Path == parentPath {
+			if folderWithin(parentPath, tree.Path) && len(tree.Path) > len(checkout) {
+				checkout = tree.Path
 				found = true
 			}
 		}
 		if !found {
 			return Worktree{}, errors.New("parent must be a checkout of this project")
 		}
+		parentPath = checkout
 		resolvePath = parentPath
 		base = "HEAD"
 	}
@@ -522,7 +531,7 @@ func (m *Manager) RemoveWorktree(projectID, path string) error {
 		return errors.New("only a linked worktree can be removed")
 	}
 	for _, t := range m.state.Terminals {
-		if t.Path == path {
+		if folderWithin(t.Path, path) {
 			if _, err = m.tmux("has-session", "-t", "="+sessionName(t.ID)); err == nil {
 				return errors.New("stop this worktree's terminals before removing it")
 			}

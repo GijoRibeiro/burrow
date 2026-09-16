@@ -69,6 +69,7 @@ it("opens canvas actions without capturing macOS Control-click as a drag", () =>
     creature: () => "Grook",
     select: () => {},
     newHead: () => {},
+    newAgent: () => {},
     review: () => {},
     task: () => {},
     menu,

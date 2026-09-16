@@ -10,6 +10,21 @@ This package contains the app, its local server, fonts, and first-run installer.
 6. Add any project folder, create a terminal, and choose your agent. Git is only needed for worktrees and delegated teams. Sign into your own Claude or Codex account in Terminal view on first launch. Agents start in YOLO mode, allowing broad file and command access; use trusted project folders.
 7. To create a worktree from Linear, choose **+ → From Linear**, connect your own personal API key, and select a ticket. Linear is optional.
 
+To start from GitHub, choose **Add project → GitHub repository**. The app uses
+your active GitHub CLI account, or **Connect GitHub** opens a guided installation
+and browser sign-in. Search your personal and organization repositories, select
+one, and choose the parent folder and a new folder name. **Clone and open** adds
+the checkout to your workspace. Existing folders are never overwritten. Cancel
+stops the clone; closing the app cancels unfinished clones while existing agent
+terminals keep running. GitHub CLI manages your credentials; the app does not
+ask for a token or store a copy. In the browser edition, run
+`gh auth login --hostname github.com --git-protocol https --web` and click
+**Refresh**. See [GitHub CLI authentication](https://cli.github.com/manual/gh_auth_login).
+
+To create an agent directly, choose **Team canvas → + Agent**, or right-click
+empty canvas space. Select Claude or Codex, choose a folder, and start. A head
+agent or Git repository is not required.
+
 You can reopen **Setup and tools** from the sidebar. Use **⌘W** to close the window, **⌘M** to minimize, **⌘Q** to quit, and **⌃⌘F** for full screen. Drag the app's wordmark or empty toolbar area to move the window.
 
 No projects, conversations, credentials, or terminal sessions from the developer's computer are included. Data is stored locally in your home folder; CLI accounts are managed by their providers. An internet connection is needed for installing tools and using agents or Linear. Git and tmux remain installed when the app is removed.

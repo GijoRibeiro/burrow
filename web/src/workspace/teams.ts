@@ -27,6 +27,20 @@ export function newHeadDialog(
     );
     return;
   }
+  const preferred = existing
+    ? folders
+        .filter((folder) => {
+          const [projectId, path] = JSON.parse(folder.value);
+          return (
+            projectId === existing.projectId &&
+            (existing.path === path || existing.path.startsWith(path + "/"))
+          );
+        })
+        .sort(
+          (a, b) =>
+            JSON.parse(b.value)[1].length - JSON.parse(a.value)[1].length,
+        )[0]
+    : undefined;
   dialog(
     "Meet your head agent",
     "Tell your head what to work on. It can read Linear, create agents, and coordinate them immediately. You can discuss scope directly in its terminal.",
@@ -35,9 +49,7 @@ export function newHeadDialog(
         name: "folder",
         label: "Project / checkout",
         options: folders,
-        value: existing
-          ? JSON.stringify([existing.projectId, existing.path])
-          : folders[0].value,
+        value: preferred?.value || folders[0].value,
       },
       {
         name: "program",
