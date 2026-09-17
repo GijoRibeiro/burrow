@@ -29,3 +29,15 @@ test("bounds galleries", () => {
     ),
   ).toHaveLength(8);
 });
+
+test("keeps attachment transport instructions out of the human bubble", async () => {
+  const { chatMessageText } = await import("./image-previews");
+  const text = "Look at this";
+  const suffix =
+    "\n\nAttached images (open these files to view them):\n[Image 1](</tmp/workspace/attachments/terminal/image-123.png>)";
+  expect(chatMessageText("terminal", text + suffix)).toBe(text);
+  expect(chatMessageText("other", text + suffix)).toBe(text + suffix);
+  expect(
+    chatMessageText("terminal", text + suffix + "\nMore human text"),
+  ).toContain("More human text");
+});

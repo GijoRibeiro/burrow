@@ -1,5 +1,23 @@
 import { button, el } from "./dom";
 
+// The agent needs file references; the human-facing bubble already has previews.
+export function chatMessageText(terminalId: string, text: string): string {
+  const marker = "\n\nAttached images (open these files to view them):\n";
+  const index = text.lastIndexOf(marker);
+  if (index < 0) return text;
+  const suffix = text.slice(index + marker.length);
+  const paths = imagePaths(suffix);
+  if (
+    !paths.length ||
+    !suffix
+      .split("\n")
+      .every((line) => /^\[Image \d+\]\(<[^>\n]+>\)$/.test(line)) ||
+    !paths.every((path) => path.includes(`/attachments/${terminalId}/image-`))
+  )
+    return text;
+  return text.slice(0, index);
+}
+
 // Keep the original text intact. Only local raster image references become previews.
 export function imagePaths(text: string): string[] {
   const paths = new Set<string>();
@@ -72,11 +90,14 @@ export function imagePreviews(
   const paths = imagePaths(text);
   if (!paths.length) return;
   const gallery = el("div", "image-previews");
-  for (const path of paths) {
+  for (const [index, path] of paths.entries()) {
+    const name = path.includes(`/attachments/${terminalId}/image-`)
+      ? `Image ${index + 1}`
+      : path.split("/").pop()!;
     const src = `/api/workspace/terminals/${encodeURIComponent(terminalId)}/image?path=${encodeURIComponent(path)}`;
     const card = button(
-      `Preview ${path.split("/").pop()}`,
-      () => openImage(src, path),
+      `Preview ${name}`,
+      () => openImage(src, name),
       "image-preview",
       "",
     );
@@ -95,7 +116,7 @@ export function imagePreviews(
     image.onerror = () => card.remove();
     image.src = src;
     card.title = path;
-    card.append(image, el("span", "", path.split("/").pop()));
+    card.append(image, el("span", "", name));
     gallery.append(card);
   }
   return gallery;

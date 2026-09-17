@@ -3,7 +3,7 @@ import { busyPhrases } from "./busy-phrases";
 import { renderChatMarkdown } from "./chat-markdown";
 import { ReplyReveal } from "./reply-reveal";
 import { el, button } from "./dom";
-import { imagePaths, imagePreviews } from "./image-previews";
+import { imagePaths, imagePreviews, chatMessageText } from "./image-previews";
 import { creature } from "./creature";
 import claudeIcon from "../../assets/brands/claude.svg";
 import codexIcon from "../../assets/brands/openai.svg";
@@ -70,6 +70,7 @@ export class AgentView {
   private pending: {
     id: string;
     text: string;
+    afterId?: string;
     state: "sending" | "sent" | "failed";
   }[] = [];
   private seenUserMessages = new Set<string>();
@@ -197,7 +198,10 @@ export class AgentView {
     this.pending = this.pending.filter(
       (p) => p.state !== "failed" || p.text !== text,
     );
-    this.pending.push({ id, text, state: "sending" });
+    const last = this.activity?.messages.at(-1)?.id;
+    const afterId =
+      this.pending.at(-1)?.id || (last && (this.messageKeys.get(last) || last));
+    this.pending.push({ id, text, afterId, state: "sending" });
     this.render();
     this.scroller.latest();
     return id;
@@ -419,12 +423,24 @@ export class AgentView {
         message.state === "sending"
           ? "Sending…"
           : message.state === "sent"
-            ? "Sent · waiting for agent"
+            ? "Sent to terminal"
             : "Not sent · your draft is ready to retry",
       );
       status.setAttribute("role", "status");
       item.append(status);
-      nodes.push(item);
+      // Keep the draft at its send position while awaiting the native receipt.
+      // New replies must appear below it, not behind a permanently last bubble.
+      const anchor = nodes.findIndex(
+        (node) => node.dataset.messageId === message.afterId,
+      );
+      const first = nodes.findIndex((node) =>
+        node.classList.contains("conversation-message"),
+      );
+      nodes.splice(
+        anchor >= 0 ? anchor + 1 : first >= 0 ? first : nodes.length,
+        0,
+        item,
+      );
     }
     // Keep unchanged messages mounted: selection, images and arrival animations
     // survive polling and acknowledgement of optimistic outgoing messages.
@@ -473,7 +489,8 @@ export class AgentView {
           role === "user" ? undefined : new ReplyReveal(text, animate);
         item.replaceChildren(
           el("span", "message-role", role === "user" ? "YOU" : "CLAUDE"),
-          cached.reply?.element || renderChatMarkdown(text),
+          cached.reply?.element ||
+            renderChatMarkdown(chatMessageText(this.terminalId, text)),
         );
       }
       const paths = imagePaths(text);
