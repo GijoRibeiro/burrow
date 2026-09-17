@@ -210,12 +210,16 @@ func parseConversation(data []byte) Activity {
 func (c *conversationLog) consume(line []byte) {
 	a := &c.activity
 	var entry struct {
-		Type        string `json:"type"`
-		UUID        string `json:"uuid"`
-		Subtype     string `json:"subtype"`
-		IsMeta      bool   `json:"isMeta"`
-		IsSidechain bool   `json:"isSidechain"`
-		Attachment  struct {
+		Type         string `json:"type"`
+		UUID         string `json:"uuid"`
+		Subtype      string `json:"subtype"`
+		IsMeta       bool   `json:"isMeta"`
+		IsSidechain  bool   `json:"isSidechain"`
+		PromptSource string `json:"promptSource"`
+		Origin       struct {
+			Kind string `json:"kind"`
+		} `json:"origin"`
+		Attachment struct {
 			HookEvent string `json:"hookEvent"`
 		} `json:"attachment"`
 		Message struct {
@@ -232,6 +236,12 @@ func (c *conversationLog) consume(line []byte) {
 		return
 	}
 	if entry.Type != "assistant" && entry.Type != "user" || entry.IsMeta {
+		return
+	}
+	// Claude records background-task events with role=user, even though no
+	// human sent them. They already reach Claude through its native runtime;
+	// exclude them from the chat mirror without changing or resending them.
+	if entry.Type == "user" && (entry.PromptSource == "system" || entry.Origin.Kind == "task-notification") {
 		return
 	}
 	a.Status = "working"

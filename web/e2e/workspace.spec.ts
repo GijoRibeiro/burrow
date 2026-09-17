@@ -4054,6 +4054,17 @@ test("chat retains complete public history across large tool results and new rep
     transcript,
     history +
       tool +
+      JSON.stringify({
+        type: "user",
+        uuid: "background-notification",
+        promptSource: "system",
+        origin: { kind: "task-notification" },
+        message: {
+          content:
+            "<task-notification><task-id>test-ci</task-id><status>completed</status><summary>Background CI finished</summary></task-notification>",
+        },
+      }) +
+      "\n" +
       record("latest", "The latest reply after a large tool result."),
   );
   await expect(pane.locator(".conversation-message.assistant")).toHaveCount(
@@ -4066,6 +4077,11 @@ test("chat retains complete public history across large tool results and new rep
     "Hidden tool output",
   );
   await expect(pane.locator(".history-note")).toHaveCount(0);
+  await expect(pane.locator(".conversation-message.user")).toHaveCount(0);
+  await expect(pane.locator(".agent-content")).not.toContainText(
+    "<task-notification>",
+  );
+  expect(readFileSync(transcript, "utf8")).toContain("<task-notification>");
   // A cold reopen must recover the same history, not just messages seen while open.
   await page.reload();
   await expect(pane.locator(".conversation-message.assistant")).toHaveCount(
