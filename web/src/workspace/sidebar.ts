@@ -10,6 +10,7 @@ export interface SidebarContext {
   onlyActive?: boolean;
   search: HTMLInputElement;
   tree: Tree | null;
+  visible?: Set<string>;
   active: string | null;
   selectedPath: string;
   collapsed: Set<string>;
@@ -34,7 +35,7 @@ export interface SidebarContext {
 export function renderProjectList(ctx: SidebarContext): void {
   ctx.projects.replaceChildren();
   const filter = ctx.search.value.toLowerCase();
-  const visible = new Set(ids(ctx.tree));
+  const visible = ctx.visible || new Set(ids(ctx.tree));
   for (const p of ctx.state.projects) {
     const terminals = ctx.state.terminals.filter(
       (t) =>

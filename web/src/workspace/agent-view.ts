@@ -1,3 +1,4 @@
+import { busyPhrases } from "./busy-phrases";
 import { renderChatMarkdown } from "./chat-markdown";
 import { el, button } from "./dom";
 import { imagePreviews } from "./image-previews";
@@ -36,13 +37,26 @@ export class AgentView {
   private progressKey = "";
   private progressAt = Date.now();
   private wasWorking = false;
+  private nextPhrase = busyPhrases();
+  private busyLabel = this.nextPhrase();
+  private phraseAt = 0;
+  private visibleTimer?: ReturnType<typeof setInterval>;
   private interruptButton: HTMLButtonElement;
   private activity?: Activity;
+  private refreshFailed = false;
+  private pending: {
+    id: string;
+    text: string;
+    state: "sending" | "sent" | "failed";
+  }[] = [];
+  private seenUserMessages = new Set<string>();
   private screen = "";
   private visibleScreen = "";
   private connection = "Connecting";
   private signature = "";
   private statusText = "";
+  private scrollPosition = 0;
+  private followOutput = true;
   private name: string;
   constructor(
     name: string,
@@ -67,6 +81,16 @@ export class AgentView {
     this.heading.append(this.avatar, info);
     this.notice.hidden = true;
     this.content.tabIndex = 0;
+    this.content.addEventListener("scroll", () => this.captureScroll(), {
+      passive: true,
+    });
+    this.content.addEventListener(
+      "load",
+      () => {
+        if (this.followOutput) this.restoreScroll();
+      },
+      true,
+    );
     this.content.setAttribute("aria-label", "Agent conversation and output");
     this.error.setAttribute("role", "alert");
     this.element.append(
@@ -77,6 +101,30 @@ export class AgentView {
     );
     this.setCreature(name);
   }
+  captureScroll(): void {
+    if (!this.content.isConnected || !this.content.clientHeight) return;
+    this.scrollPosition = this.content.scrollTop;
+    this.followOutput =
+      this.content.scrollHeight -
+        this.content.scrollTop -
+        this.content.clientHeight <
+      60;
+  }
+  restoreScroll(): void {
+    if (!this.content.isConnected || !this.content.clientHeight) return;
+    this.content.scrollTop = this.followOutput
+      ? this.content.scrollHeight
+      : this.scrollPosition;
+  }
+  setVisible(visible: boolean): void {
+    if (visible) this.restoreScroll();
+    clearInterval(this.visibleTimer);
+    this.visibleTimer = visible
+      ? setInterval(() => {
+          if (this.wasWorking) this.render();
+        }, 8000)
+      : undefined;
+  }
   showError(text: string): void {
     this.error.textContent = text;
   }
@@ -85,7 +133,37 @@ export class AgentView {
     this.avatar.replaceChildren(creature(name));
   }
   setActivity(activity: Activity): void {
+    this.refreshFailed = false;
+    for (const message of activity.messages) {
+      if (message.role !== "user" || this.seenUserMessages.has(message.id))
+        continue;
+      this.seenUserMessages.add(message.id);
+      const index = this.pending.findIndex(
+        (p) => p.state !== "failed" && p.text.trim() === message.text.trim(),
+      );
+      if (index >= 0) this.pending.splice(index, 1);
+    }
+    if (this.seenUserMessages.size > 2000)
+      this.seenUserMessages = new Set([...this.seenUserMessages].slice(-1000));
     this.activity = activity;
+    this.render();
+  }
+  beginMessage(text: string): string {
+    const id = crypto.randomUUID();
+    // A retry supersedes the previous failed copy, not an earlier delivered turn.
+    this.pending = this.pending.filter(
+      (p) => p.state !== "failed" || p.text !== text,
+    );
+    this.pending.push({ id, text, state: "sending" });
+    this.followOutput = true;
+    this.render();
+    this.followOutput = true;
+    this.restoreScroll();
+    return id;
+  }
+  finishMessage(id: string, sent: boolean): void {
+    const message = this.pending.find((p) => p.id === id);
+    if (message) message.state = sent ? "sent" : "failed";
     this.render();
   }
   setConnection(value: string): void {
@@ -98,7 +176,8 @@ export class AgentView {
     this.render();
   }
   unavailable(): void {
-    this.activity = undefined;
+    this.refreshFailed = true;
+    if (this.activity) this.activity = { ...this.activity, canMessage: false };
     this.render();
   }
   private render(): void {
@@ -123,6 +202,10 @@ export class AgentView {
     if (!working || !this.wasWorking || progressKey !== this.progressKey)
       this.progressAt = Date.now();
     this.progressKey = progressKey;
+    if (working && (!this.wasWorking || Date.now() - this.phraseAt >= 8000)) {
+      this.busyLabel = this.nextPhrase();
+      this.phraseAt = Date.now();
+    }
     this.wasWorking = working;
     const stalled = working && Date.now() - this.progressAt >= 60_000;
     const providerError =
@@ -139,19 +222,23 @@ export class AgentView {
     this.interruptButton.hidden = !stalled;
     const label = !live
       ? this.connection
-      : attention
-        ? "Your move"
-        : working
-          ? "thinking..."
-          : a?.kind === "codex"
-            ? "Codex · Terminal ready"
-            : a?.kind === "claude"
-              ? a.canMessage
-                ? "Ready when you are"
-                : "Finish setup in Terminal"
-              : a
-                ? "No agent running"
-                : "Checking for an agent…";
+      : this.refreshFailed
+        ? "Reconnecting to agent…"
+        : attention
+          ? "Your move"
+          : working
+            ? this.busyLabel
+            : a?.kind === "codex"
+              ? "Codex · Terminal ready"
+              : a?.kind === "claude"
+                ? a.canMessage
+                  ? "Ready when you are"
+                  : a.status === "starting"
+                    ? "Claude · Connecting…"
+                    : "Finish setup in Terminal"
+                : a
+                  ? "No agent running"
+                  : "Terminal connected";
     if (label !== this.statusText) {
       this.label.textContent = label;
       this.statusText = label;
@@ -161,19 +248,15 @@ export class AgentView {
         ? `${this.name} · Claude${working && a.tool ? ` · ${a.tool}` : ""}${a.tools ? ` · ${a.tools} tool calls` : ""}`
         : `${this.name} · ${a?.kind === "codex" ? "Codex" : "Shell"}`;
     const conversation = a?.kind === "claude" && a.messages.length > 0;
-    const key = JSON.stringify(
+    const key = JSON.stringify([
       conversation
         ? [a.messages, a.truncated]
         : [this.screen, a?.kind, a?.status, live],
-    );
+      this.pending,
+    ]);
     if (key === this.signature) return;
     this.signature = key;
-    const follow =
-      this.content.scrollHeight -
-        this.content.scrollTop -
-        this.content.clientHeight <
-      60;
-    const scroll = this.content.scrollTop;
+    this.captureScroll();
     const nodes: HTMLElement[] = [];
     if (conversation) {
       if (a.truncated)
@@ -198,6 +281,8 @@ export class AgentView {
         if (previews) item.append(previews);
         nodes.push(item);
       }
+    } else if (this.pending.length) {
+      // The first outgoing turn is already useful content while the transcript loads.
     } else if (a?.kind === "codex") {
       nodes.push(
         el(
@@ -214,9 +299,11 @@ export class AgentView {
         el(
           "p",
           "history-note",
-          a.canMessage
-            ? "Claude is connected. Send a message below."
-            : "Open Terminal to complete Claude’s setup or respond to its prompt.",
+          a.status === "starting"
+            ? "Connecting to Claude…"
+            : a.canMessage
+              ? "Claude is connected. Send a message below."
+              : "Open Terminal to complete Claude’s setup or respond to its prompt.",
         ),
       );
       nodes.push(button("Open terminal", this.openTerminal, "secondary"));
@@ -284,7 +371,30 @@ export class AgentView {
       const previews = imagePreviews(this.terminalId, this.screen);
       if (previews) nodes.push(previews);
     }
+    for (const message of this.pending) {
+      const item = el(
+        "article",
+        `conversation-message user pending-message ${message.state}`,
+      );
+      item.dataset.messageId = message.id;
+      item.append(
+        el("span", "message-role", "YOU"),
+        renderChatMarkdown(message.text),
+      );
+      const status = el(
+        "span",
+        "message-delivery",
+        message.state === "sending"
+          ? "Sending…"
+          : message.state === "sent"
+            ? "Sent · waiting for agent"
+            : "Not sent · your draft is ready to retry",
+      );
+      status.setAttribute("role", "status");
+      item.append(status);
+      nodes.push(item);
+    }
     this.content.replaceChildren(...nodes);
-    this.content.scrollTop = follow ? this.content.scrollHeight : scroll;
+    this.restoreScroll();
   }
 }

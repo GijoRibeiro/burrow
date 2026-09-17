@@ -2664,3 +2664,49 @@ textarea {
   accent-color: var(--terminal-color);
   margin-inline-end: 0.4em;
 }
+
+.message-delivery {
+  display: block;
+  margin-top: 0.7em;
+  font-size: 0.75em;
+  color: var(--muted);
+}
+.pending-message.failed .message-delivery {
+  color: var(--terminal-color);
+}
+
+/* Activity belongs beside the next turn, within reach of the composer. */
+.terminal-pane .composer-activity {
+  flex: none;
+  height: auto;
+  min-height: 36px;
+  padding: 6px 15px;
+  border-top: 1px solid var(--line);
+}
+.composer-activity .agent-info {
+  flex: 1;
+}
+.composer-activity .agent-status-label {
+  line-height: 1.4;
+}
+.composer-activity.is-thinking .agent-avatar {
+  animation: agent-busy-hop 1s steps(2, end) infinite;
+}
+.pane-controls .view-switcher {
+  margin-right: 5px;
+}
+.pane-controls .view-button {
+  padding: 4px 6px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer-activity.is-thinking .agent-avatar {
+    animation: none;
+  }
+}
+.pane-controls .view-button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 24px;
+  padding: 0;
+}

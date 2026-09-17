@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -37,17 +38,18 @@ type Worktree struct {
 	Main       bool                  `json:"main"`
 }
 type Terminal struct {
-	HeadID    string    `json:"headId,omitempty"`
-	Role      string    `json:"role,omitempty"`
-	Goal      string    `json:"goal,omitempty"`
-	TaskID    string    `json:"taskId,omitempty"`
-	Program   string    `json:"program,omitempty"`
-	ID        string    `json:"id"`
-	ProjectID string    `json:"projectId"`
-	Path      string    `json:"path"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"createdAt"`
-	Status    string    `json:"status"`
+	LiveStatus string    `json:"liveStatus,omitempty"`
+	HeadID     string    `json:"headId,omitempty"`
+	Role       string    `json:"role,omitempty"`
+	Goal       string    `json:"goal,omitempty"`
+	TaskID     string    `json:"taskId,omitempty"`
+	Program    string    `json:"program,omitempty"`
+	ID         string    `json:"id"`
+	ProjectID  string    `json:"projectId"`
+	Path       string    `json:"path"`
+	Name       string    `json:"name"`
+	CreatedAt  time.Time `json:"createdAt"`
+	Status     string    `json:"status"`
 }
 type State struct {
 	Plans          []TeamPlan                      `json:"plans,omitempty"`
@@ -62,6 +64,7 @@ type State struct {
 	TmuxAvailable  bool                            `json:"tmuxAvailable"`
 }
 type Manager struct {
+	complaints complaintMonitor
 	github     githubState
 	planMu     sync.Mutex
 	runtimeURL string
@@ -221,12 +224,16 @@ func (m *Manager) Snapshot() State {
 	_, err := exec.LookPath("tmux")
 	s.TmuxAvailable = err == nil
 	live := map[string]string{}
+	panePIDs := map[string]int{}
 	if s.TmuxAvailable {
-		out, _ := m.tmux("list-panes", "-a", "-F", "#{session_name} #{pane_dead}")
+		out, _ := m.tmux("list-panes", "-a", "-F", "#{session_name} #{pane_dead} #{pane_pid}")
 		for _, line := range strings.Split(out, "\n") {
 			f := strings.Fields(line)
-			if len(f) == 2 {
+			if len(f) >= 2 {
 				live[f[0]] = f[1]
+				if len(f) > 2 {
+					panePIDs[f[0]], _ = strconv.Atoi(f[2])
+				}
 			}
 		}
 	}
@@ -240,6 +247,7 @@ func (m *Manager) Snapshot() State {
 			}
 		}
 	}
+	annotateLiveAgents(s.Terminals, panePIDs)
 	for i := range s.Projects {
 		p := &s.Projects[i]
 		p.Worktrees, p.Git, err = projectCheckouts(p.Path)

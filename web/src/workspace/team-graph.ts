@@ -1,3 +1,4 @@
+import { graphConnection } from "./graph-connection";
 import { button, el } from "./dom";
 import { contextMenu } from "./context-menu";
 import { creature } from "./creature";
@@ -285,6 +286,13 @@ export class TeamGraph {
       }
     });
     this.transform();
+    let previousWidth = 0;
+    new ResizeObserver(() => {
+      this.position();
+      if (previousWidth && this.element.clientWidth !== previousWidth)
+        this.ensureVisible(this.selected);
+      previousWidth = this.element.clientWidth;
+    }).observe(this.element);
   }
   place(id: string, position: { x: number; y: number }): void {
     this.positions[id] = position;
@@ -349,9 +357,10 @@ export class TeamGraph {
       else this.positions[node.id] ||= defaults[node.id];
     }
     const shown = new Set(this.nodes.map((n) => n.id));
-    const working =
-      state.tasks?.filter((t) => shown.has(t.agentId) && t.status === "working")
-        .length || 0;
+    const working = state.terminals.filter(
+      (t) =>
+        shown.has(t.id) && t.status === "running" && t.liveStatus === "working",
+    ).length;
     const waiting =
       state.tasks?.filter((t) => shown.has(t.agentId) && t.status === "waiting")
         .length || 0;
@@ -432,6 +441,26 @@ export class TeamGraph {
       requestAnimationFrame(() => this.fit());
     }
   }
+  ensureVisible(id: string): void {
+    const p = this.positions[id],
+      scale = this.viewport.scale;
+    if (!p || !this.surface.clientWidth) return;
+    const card = [
+      ...this.cards.querySelectorAll<HTMLElement>(".team-node"),
+    ].find((c) => c.dataset.nodeId === id);
+    const width = (card?.offsetWidth || 288) * scale;
+    const height = (card?.offsetHeight || 172) * scale;
+    const left = p.x * scale + this.viewport.x;
+    const top = p.y * scale + this.viewport.y;
+    const right = this.surface.clientWidth - 20;
+    const bottom = this.surface.clientHeight - 70;
+    if (left < 20) this.viewport.x += 20 - left;
+    else if (left + width > right) this.viewport.x -= left + width - right;
+    if (top < 165) this.viewport.y += 165 - top;
+    else if (top + height > bottom) this.viewport.y -= top + height - bottom;
+    this.transform();
+    this.save();
+  }
   private card(node: GraphNode): HTMLElement {
     const card = el(
       "article",
@@ -496,6 +525,18 @@ export class TeamGraph {
                 : node.task
                   ? "Working"
                   : "Available";
+    const liveWorking =
+      node.session?.status === "running" &&
+      node.session?.liveStatus === "working";
+    card.classList.toggle("is-working", liveWorking);
+    if (liveWorking) status = "Working now";
+    else if (node.session?.liveStatus === "waiting")
+      status = "Needs your attention";
+    else if (
+      node.session?.liveStatus === "idle" &&
+      !["done", "waiting", "canceled"].includes(node.task?.status || "")
+    )
+      status = "Ready for you";
     if (node.session && node.session.status !== "running")
       status = "Agent stopped";
     if (node.item?.error) status = "Launch needs attention";
@@ -559,17 +600,19 @@ export class TeamGraph {
     for (const node of this.nodes) {
       if (!node.parent || !this.nodes.some((n) => n.id === node.parent))
         continue;
-      const a = this.positions[node.parent],
-        b = this.positions[node.id];
-      const path = svg("path"),
-        x = a.x + 288,
-        y = a.y + 86,
-        end = b.y + 86;
-      const bend = Math.max(55, Math.abs(b.x - x) * 0.5);
-      path.setAttribute(
-        "d",
-        `M ${x} ${y} C ${x + bend} ${y}, ${b.x - bend} ${end}, ${b.x} ${end}`,
-      );
+      const bounds = (id: string) => {
+        const card = [
+          ...this.cards.querySelectorAll<HTMLElement>(".team-node"),
+        ].find((el) => el.dataset.nodeId === id);
+        return {
+          ...this.positions[id],
+          width: card?.offsetWidth || 288,
+          height: card?.offsetHeight || 172,
+        };
+      };
+      const connection = graphConnection(bounds(node.parent), bounds(node.id));
+      const path = svg("path");
+      path.setAttribute("d", connection.path);
       path.style.setProperty(
         "--wire-color",
         this.ctx.color(node.session?.id || node.parent),
@@ -577,13 +620,11 @@ export class TeamGraph {
       path.classList.toggle("pending", !!node.item);
       path.classList.toggle(
         "working",
-        node.task?.status === "working" && node.session?.status === "running",
+        node.session?.liveStatus === "working" &&
+          node.session?.status === "running",
       );
       this.wires.append(path);
-      for (const point of [
-        { x, y },
-        { x: b.x, y: end },
-      ]) {
+      for (const point of [connection.start, connection.end]) {
         const dot = svg("circle");
         dot.setAttribute("cx", String(point.x));
         dot.setAttribute("cy", String(point.y));

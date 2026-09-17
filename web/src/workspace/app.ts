@@ -1,6 +1,8 @@
+import { productInboxButton } from "./complaints";
 import { projectDialog } from "./project-dialog";
 import { agentDialog } from "./agent-dialog";
 import { contextMenu, type MenuAction } from "./context-menu";
+import { renderTeamDock } from "./team-dock";
 import { TeamGraph } from "./team-graph";
 import { newHeadDialog, reviewTeamPlan, linearConnectionDialog } from "./teams";
 import {
@@ -70,6 +72,9 @@ class WorkspaceApp {
   private appearances: Record<string, PaneAppearance> = {};
   private view: "terminals" | "team" = "terminals";
   private teamSelected = "";
+  private teamPinned = "";
+  private teamDockRatio = 0.61;
+  private teamPanesRatio = 0.5;
   private teamGraph: TeamGraph;
   private viewSwitch = el("div", "workspace-view-switch");
   private onlyActive = false;
@@ -162,6 +167,7 @@ class WorkspaceApp {
         "subtle",
         "Linear connection",
       ),
+      productInboxButton(),
       button("Setup and tools", setupDialog, "subtle"),
     );
     this.sidebar.append(
@@ -283,6 +289,9 @@ class WorkspaceApp {
         return this.panes.get(this.active || "")?.selection() || "";
       },
     });
+    matchMedia("(max-width: 760px)").addEventListener("change", () =>
+      this.renderCanvas(),
+    );
     this.refresh();
     setInterval(() => this.refresh(), 3000);
   }
@@ -307,6 +316,12 @@ class WorkspaceApp {
           this.view = saved.view === "team" ? "team" : "terminals";
           this.teamSelected =
             typeof saved.teamSelected === "string" ? saved.teamSelected : "";
+          this.teamPinned =
+            typeof saved.teamPinned === "string" ? saved.teamPinned : "";
+          for (const key of ["teamDockRatio", "teamPanesRatio"] as const) {
+            if (typeof saved[key] === "number" && Number.isFinite(saved[key]))
+              this[key] = Math.max(0.1, Math.min(0.9, saved[key]));
+          }
           this.onlyActive = saved.onlyActive === true;
           this.activeFilter.setAttribute(
             "aria-pressed",
@@ -420,6 +435,9 @@ class WorkspaceApp {
         JSON.stringify({
           view: this.view,
           teamSelected: this.teamSelected,
+          teamPinned: this.teamPinned,
+          teamDockRatio: this.teamDockRatio,
+          teamPanesRatio: this.teamPanesRatio,
           onlyActive: this.onlyActive,
           tree: this.tree,
           active: this.active,
@@ -475,6 +493,7 @@ class WorkspaceApp {
       onlyActive: this.onlyActive,
       search: this.search,
       tree: this.tree,
+      visible: this.onScreenIds(),
       active: this.active,
       selectedPath: this.selectedPath,
       collapsed: this.collapsed,
@@ -506,12 +525,24 @@ class WorkspaceApp {
       },
     });
   }
+  private onScreenIds(): Set<string> {
+    return new Set(
+      this.view === "team"
+        ? [this.teamPinned, this.teamSelected].filter(Boolean)
+        : ids(this.tree),
+    );
+  }
   private renderCanvas(): void {
-    const visible = new Set(ids(this.tree));
+    for (const pane of this.panes.values()) pane.captureScroll();
+    const visible = this.onScreenIds();
     if (!this.state.terminals.some((t) => t.id === this.teamSelected))
       this.teamSelected = "";
-    if (this.view === "team" && this.teamSelected)
-      visible.add(this.teamSelected);
+    if (!this.state.terminals.some((t) => t.id === this.teamPinned))
+      this.teamPinned = "";
+    if (this.view === "team") {
+      if (this.teamSelected) visible.add(this.teamSelected);
+      if (this.teamPinned) visible.add(this.teamPinned);
+    }
     this.canvas.classList.toggle("team-mode", this.view === "team");
     for (const b of this.viewSwitch.querySelectorAll("button"))
       b.setAttribute("aria-pressed", String(b.dataset.view === this.view));
@@ -523,6 +554,8 @@ class WorkspaceApp {
       {
         view: this.view,
         teamSelected: this.teamSelected,
+        teamPinned: this.teamPinned,
+        stacked: matchMedia("(max-width: 760px)").matches,
         tree: this.tree,
         zoomed: this.zoomed,
         empty: this.tree
@@ -539,9 +572,13 @@ class WorkspaceApp {
           )
         : () => {};
     for (const [id, pane] of this.panes) {
-      if (!visible.has(id)) {
+      const session = this.state.terminals.find((t) => t.id === id);
+      if (!session) {
         pane.dispose();
         this.panes.delete(id);
+      } else {
+        pane.update(session);
+        if (!visible.has(id)) pane.element.remove();
       }
     }
     for (const t of this.state.terminals) {
@@ -607,6 +644,9 @@ class WorkspaceApp {
 
         this.panes.set(t.id, pane);
       }
+      // Touch visible panes so the least recently used hidden ones expire first.
+      this.panes.delete(t.id);
+      this.panes.set(t.id, pane);
       pane.update(t);
       const plan =
         t.role === "head"
@@ -628,37 +668,27 @@ class WorkspaceApp {
       // Move existing pane nodes; never recreate terminals on a layout change.
       this.canvas.replaceChildren();
       if (this.view === "team") {
-        const layout = el("div", "team-workspace");
-        layout.append(this.teamGraph.element);
-        if (this.teamSelected) {
-          const dock = el("aside", "team-dock"),
-            bar = el("div", "team-dock-toolbar"),
-            host = el("div", "team-dock-host");
-          bar.append(
-            el("span", "", "IN CONVERSATION"),
-            button(
-              "Open selected agent in terminals",
-              () => this.openInTerminals(this.teamSelected),
-              "subtle",
-              "Open in terminals ↗",
-            ),
-            button(
-              "Close canvas terminal",
-              () => {
-                this.teamSelected = "";
-                this.renderCanvas();
-                this.persist();
-              },
-              "icon-button",
-              "×",
-            ),
-          );
-          const pane = this.panes.get(this.teamSelected);
-          if (pane) host.append(pane.element);
-          dock.append(bar, host);
-          layout.append(dock);
-        }
-        this.canvas.append(layout);
+        this.canvas.append(
+          renderTeamDock(this.teamGraph.element, this.panes, {
+            selected: this.teamSelected,
+            pinned: this.teamPinned,
+            ratio: this.teamDockRatio,
+            panesRatio: this.teamPanesRatio,
+            stacked: matchMedia("(max-width: 760px)").matches,
+            open: (id) => this.openInTerminals(id),
+            close: (id) => this.hide(id),
+            pin: (id) => {
+              this.teamPinned = id;
+              this.renderCanvas();
+              this.persist();
+            },
+            resize: (ratio, panesRatio) => {
+              this.teamDockRatio = ratio;
+              this.teamPanesRatio = panesRatio;
+              this.persist();
+            },
+          }),
+        );
       } else if (this.tree) {
         if (this.zoomed) {
           const pane = this.panes.get(this.zoomed);
@@ -669,6 +699,7 @@ class WorkspaceApp {
           );
       } else this.renderEmpty();
       animate();
+      this.renderSidebar();
     }
     this.count.textContent =
       this.view === "team" ? "Your team" : `${visible.size} on screen`;
@@ -677,7 +708,19 @@ class WorkspaceApp {
     ).length;
     this.footer.textContent = `${this.state.projects.length} projects · ${running} running · ${this.state.terminals.filter((t) => t.status === "running" && !visible.has(t.id)).length} in background${this.zoomed ? " · focused view" : ""}`;
     this.paintFocus();
-    for (const pane of this.panes.values()) pane.fit();
+    // Keep a small set of recent views warm. Their tmux sessions are independent
+    // and remain alive even when an older view is evicted from this UI cache.
+    const hidden = [...this.panes].filter(
+      ([id, pane]) => !visible.has(id) && !pane.hasPendingSend,
+    );
+    for (const [id, pane] of hidden.slice(0, Math.max(0, hidden.length - 8))) {
+      pane.dispose();
+      this.panes.delete(id);
+    }
+    for (const pane of this.panes.values()) {
+      pane.setVisible(pane.element.isConnected);
+      pane.fit();
+    }
   }
   private renderEmpty(): void {
     const empty = el("div", "empty-workspace");
@@ -747,7 +790,8 @@ class WorkspaceApp {
   }
   private hide(id: string): void {
     if (this.view === "team") {
-      this.teamSelected = "";
+      if (this.teamSelected === id) this.teamSelected = "";
+      if (this.teamPinned === id) this.teamPinned = "";
       this.renderCanvas();
       this.persist();
       return;
@@ -820,10 +864,11 @@ class WorkspaceApp {
     this.persist();
   }
   private selectTeamAgent(id: string): void {
-    this.teamSelected = id;
+    if (id !== this.teamPinned || !this.teamSelected) this.teamSelected = id;
     this.active = id;
     this.teamGraph.reveal(id);
     this.renderCanvas();
+    requestAnimationFrame(() => this.teamGraph.ensureVisible(id));
     this.persist();
     this.panes.get(id)?.focus();
   }

@@ -1,0 +1,115 @@
+dialog.complaints-dialog {
+  width: min(940px, 94vw);
+  max-height: 90vh;
+  overflow: auto;
+}
+.complaints-heading,
+.complaints-actions,
+.complaints-filters,
+.complaint-meta,
+.complaint-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.complaints-heading {
+  justify-content: space-between;
+}
+.complaints-heading h2 {
+  margin: 0;
+}
+.complaints-scope {
+  display: grid;
+  gap: 8px;
+  margin: 24px 0 16px;
+}
+.complaints-scope small,
+.complaints-status,
+.complaint-meta {
+  color: var(--muted);
+  font-size: 13px;
+}
+.complaints-schedule {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.complaints-schedule input {
+  width: auto;
+  accent-color: var(--ink);
+}
+.complaints-actions {
+  margin: 20px 0;
+}
+.complaints-actions a {
+  color: var(--ink);
+  margin-left: auto;
+}
+.complaints-status {
+  line-height: 1.6;
+}
+.complaints-filters {
+  margin: 20px 0;
+}
+.complaints-filters input {
+  flex: 1;
+  min-width: 180px;
+}
+.complaints-filters select {
+  width: auto;
+}
+.complaint-card {
+  border: 1px solid var(--line);
+  padding: 22px;
+  margin: 14px 0;
+}
+.complaint-card h3 {
+  margin: 14px 0 8px;
+  font:
+    600 19px/1.4 "DM Sans",
+    sans-serif;
+}
+.complaint-card p,
+.complaint-card blockquote {
+  font-size: 15px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.complaint-card blockquote {
+  margin: 16px 0;
+  padding: 14px;
+  background: color-mix(in srgb, var(--ink) 4%, var(--bg));
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+.complaint-source {
+  color: var(--ink);
+  margin-right: auto;
+}
+.complaint-controls {
+  font-size: 13px;
+}
+.complaints-empty {
+  text-align: center;
+  color: var(--muted);
+  padding: 50px 20px;
+  border: 1px dashed var(--line);
+  line-height: 1.7;
+}
+
+.complaints-help {
+  color: var(--muted);
+  font-size: 13px;
+}
+.complaints-help summary {
+  cursor: pointer;
+}
+.complaints-heading {
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 2;
+  padding: 8px 0;
+}

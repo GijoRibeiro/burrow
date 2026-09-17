@@ -34,6 +34,7 @@ func (m *Manager) Handler() http.Handler {
 	m.coordinationRoutes(mux)
 	m.teamRoutes(mux)
 	m.githubRoutes(mux)
+	m.complaintRoutes(mux)
 	// Native readiness must not scan repositories or start external processes.
 	mux.HandleFunc("GET /api/workspace/health", func(w http.ResponseWriter, r *http.Request) {
 		respond(w, map[string]string{"service": "cloovies-workspace"}, nil)
