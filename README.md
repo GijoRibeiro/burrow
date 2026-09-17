@@ -114,6 +114,21 @@ For development app replacements while agents are running, follow the
 [macOS update procedure](docs/MACOS-UPDATES.md) to preserve sessions without
 creating repeated folder permission prompts.
 
+## Running apps
+
+Each terminal shows **Open app** links below its header when a web server is
+listening in that terminal or checkout. Links work in both conversation and raw
+terminal views, including the Team canvas dock. Click the monitor icon in the
+header to show or hide the links, or check whether any app is running.
+
+Detection refreshes every five seconds while panels are visible. It follows
+terminal processes and also finds detached background servers by their checkout
+folder, keeping sibling worktrees separate. Shared checkout servers are labeled
+in the link tooltip. HTTP and HTTPS are detected; local development certificate
+hostnames are used when they resolve to loopback. Database ports and unrelated
+apps are excluded. Discovery uses macOS’s built-in `lsof` and does not restart
+servers or change their configuration.
+
 ## Product complaints inbox
 
 Open **Product inbox** in the sidebar, choose Slack channels, and click **Scan now**.
