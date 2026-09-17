@@ -185,8 +185,6 @@ export class AgentView {
         this.pending.splice(index, 1);
       }
     }
-    if (this.seenUserMessages.size > 2000)
-      this.seenUserMessages = new Set([...this.seenUserMessages].slice(-1000));
     this.activity = activity;
     this.render(this.catchUpOnActivity);
     this.catchUpOnActivity = false;

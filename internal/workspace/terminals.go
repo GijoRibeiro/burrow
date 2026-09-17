@@ -245,5 +245,8 @@ func (m *Manager) updateTerminal(id, action, name string) error {
 		m.state.Plans, m.state.Tasks = oldPlans, oldTasks
 		return err
 	}
+	if action == "remove" {
+		m.conversations.Delete(id)
+	}
 	return nil
 }

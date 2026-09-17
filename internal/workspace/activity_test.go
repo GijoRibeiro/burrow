@@ -42,9 +42,10 @@ func TestQuietConversation(t *testing.T) {
 func TestConversationTailWaitsForCompleteRecord(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	os.WriteFile(path, []byte("{\"type\":\"user\",\"message\":{\"content\":\"Hello\"}}\n{\"type\":\"assistant\""), 0600)
-	data, truncated, err := conversationTail(path)
-	if err != nil || truncated || len(parseConversation(data).Messages) != 1 {
-		t.Fatalf("partial record: %s %v", data, err)
+	m := &Manager{}
+	activity, err := m.readConversation("terminal", path)
+	if err != nil || activity.Truncated || len(activity.Messages) != 1 {
+		t.Fatalf("partial record: %+v %v", activity, err)
 	}
 }
 func TestActivityMatchesTerminalProcessNotDirectory(t *testing.T) {

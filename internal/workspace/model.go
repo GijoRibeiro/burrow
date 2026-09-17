@@ -64,16 +64,17 @@ type State struct {
 	TmuxAvailable  bool                            `json:"tmuxAvailable"`
 }
 type Manager struct {
-	servers    serverDiscovery
-	complaints complaintMonitor
-	github     githubState
-	planMu     sync.Mutex
-	runtimeURL string
-	cliPath    string
-	mu         sync.Mutex
-	file       string
-	socket     string
-	state      State
+	conversations sync.Map // terminal ID -> *conversationReader
+	servers       serverDiscovery
+	complaints    complaintMonitor
+	github        githubState
+	planMu        sync.Mutex
+	runtimeURL    string
+	cliPath       string
+	mu            sync.Mutex
+	file          string
+	socket        string
+	state         State
 }
 
 func New(file, socket string) (*Manager, error) {
