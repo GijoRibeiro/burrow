@@ -47,6 +47,7 @@ export class AgentView {
   >();
   private messageKeys = new Map<string, string>();
   private receivedActivity = false;
+  private catchUpOnActivity = false;
   private notice = button(
     "Open terminal to respond",
     () => this.openTerminal(),
@@ -104,6 +105,15 @@ export class AgentView {
     this.content.tabIndex = 0;
     this.latest.hidden = true;
     this.content.append(this.stack);
+    const finishArrival = (event: AnimationEvent) => {
+      if (
+        event.target instanceof HTMLElement &&
+        ["message-arrive", "reply-reveal"].includes(event.animationName)
+      )
+        this.clearArrival(event.target);
+    };
+    this.stack.addEventListener("animationend", finishArrival);
+    this.stack.addEventListener("animationcancel", finishArrival);
     this.scroller = new ConversationScroll(
       this.content,
       this.stack,
@@ -118,13 +128,25 @@ export class AgentView {
     this.element.append(this.notices, this.error, this.content, this.latest);
     this.setCreature(name);
   }
+  private clearArrival(element: HTMLElement): void {
+    element.classList.remove("message-arrival", "reply-chunk-arrival");
+    element.style.removeProperty("--reveal-delay");
+  }
+  settleArrivals(): void {
+    for (const element of this.stack.querySelectorAll<HTMLElement>(
+      ".message-arrival, .reply-chunk-arrival",
+    ))
+      this.clearArrival(element);
+  }
   captureScroll(): void {
     this.scroller.capture();
   }
   reflow(): void {
     this.scroller.reflow();
   }
-  restoreScroll(): void {
+  restoreScroll(catchUp = false): void {
+    this.settleArrivals();
+    if (catchUp) this.catchUpOnActivity = true;
     this.scroller.restore();
   }
   dispose(): void {
@@ -132,6 +154,8 @@ export class AgentView {
     this.scroller.dispose();
   }
   setVisible(visible: boolean): void {
+    this.settleArrivals();
+    this.catchUpOnActivity = visible;
     this.scroller.setVisible(visible);
     clearInterval(this.visibleTimer);
     this.visibleTimer = visible
@@ -164,7 +188,8 @@ export class AgentView {
     if (this.seenUserMessages.size > 2000)
       this.seenUserMessages = new Set([...this.seenUserMessages].slice(-1000));
     this.activity = activity;
-    this.render();
+    this.render(this.catchUpOnActivity);
+    this.catchUpOnActivity = false;
     this.receivedActivity ||=
       activity.canMessage || activity.messages.length > 0;
   }
@@ -198,7 +223,7 @@ export class AgentView {
     if (this.activity) this.activity = { ...this.activity, canMessage: false };
     this.render();
   }
-  private render(): void {
+  private render(catchUp = false): void {
     const a = this.activity;
     const live = this.connection === "Live";
     const attention =
@@ -293,7 +318,7 @@ export class AgentView {
             key,
             message.role,
             message.text,
-            this.receivedActivity,
+            this.receivedActivity && !catchUp,
           ),
         );
       }
@@ -422,7 +447,7 @@ export class AgentView {
     const activeIds = new Set(a?.messages.map((message) => message.id));
     for (const key of this.messageKeys.keys())
       if (!activeIds.has(key)) this.messageKeys.delete(key);
-    if (!this.receivedActivity) this.scroller.restore();
+    if (!this.receivedActivity || catchUp) this.scroller.restore();
     else this.scroller.reflow();
   }
   private messageNode(
@@ -444,7 +469,7 @@ export class AgentView {
     item.querySelector(".message-delivery")?.remove();
     if (cached.text !== text || cached.role !== role) {
       if (role !== "user" && cached.reply) {
-        cached.reply.update(text);
+        cached.reply.update(text, animate);
       } else {
         cached.reply =
           role === "user" ? undefined : new ReplyReveal(text, animate);

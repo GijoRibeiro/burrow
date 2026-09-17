@@ -305,6 +305,9 @@ export class TerminalPane {
       },
     );
   }
+  settleArrivals(): void {
+    this.agent.settleArrivals();
+  }
   captureScroll(): void {
     this.agent.captureScroll();
     if (this.viewVisible && this.appearance.view === "terminal")
@@ -353,6 +356,8 @@ export class TerminalPane {
     }
   }
   private setView(view: "agent" | "terminal", focus = true): void {
+    const changed = this.appearance.view !== view;
+    this.agent.settleArrivals();
     this.appearance.view = view;
     this.element.dataset.view = view;
     this.agentButton.setAttribute("aria-pressed", String(view === "agent"));
@@ -365,7 +370,7 @@ export class TerminalPane {
     this.agent.element.hidden = view !== "agent";
     this.refreshComposer();
     this.fit();
-    this.agent.restoreScroll();
+    this.agent.restoreScroll(changed && view === "agent");
     if (focus) {
       reveal(view === "agent" ? this.agent.element : this.host);
       this.saveAppearance();
