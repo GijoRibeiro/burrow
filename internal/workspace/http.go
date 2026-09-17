@@ -103,6 +103,7 @@ func (m *Manager) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /api/workspace/terminals/{id}/connect", m.connect)
 	mux.HandleFunc("GET /api/workspace/terminals/{id}/image", m.terminalImage)
+	mux.HandleFunc("POST /api/workspace/terminals/{id}/images", m.uploadImage)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		if !localRequest(r) {

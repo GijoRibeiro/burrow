@@ -40,10 +40,11 @@ final class WorkspaceApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
         windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         let windowItem = NSMenuItem(); windowItem.submenu = windowMenu; main.addItem(windowItem)
         let edit = NSMenu(title: "Edit")
-        for (title, selector, key) in [("Undo", "undo:", "z"), ("Cut", "cut:", "x"), ("Paste", "paste:", "v"), ("Select All", "selectAll:", "a")] {
+        for (title, selector, key) in [("Undo", "undo:", "z"), ("Cut", "cut:", "x"), ("Select All", "selectAll:", "a")] {
             edit.addItem(withTitle: title, action: Selector(selector), keyEquivalent: key)
         }
         let copy = NSMenuItem(title: "Copy", action: #selector(copyText), keyEquivalent: "c"); copy.target = self; edit.insertItem(copy, at: 2)
+        let paste = NSMenuItem(title: "Paste", action: #selector(pasteContent(_:)), keyEquivalent: "v"); paste.target = self; edit.insertItem(paste, at: 3)
         let editItem = NSMenuItem(); editItem.submenu = edit; main.addItem(editItem)
         let view = NSMenu(title: "View")
         for (title, command, key) in [("Increase Text Size", "increase", "="), ("Decrease Text Size", "decrease", "-"), ("Reset Text Size", "reset", "0"), ("Choose Terminals", "choose", "k"), ("Toggle Sidebar", "sidebar", "b"), ("Focus Pane", "zoom", "\r"), ("New Terminal", "new", "N"), ("Keyboard Shortcuts", "help", "?")] {
@@ -112,6 +113,35 @@ final class WorkspaceApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
         let failure = error as NSError
         guard !(failure.domain == NSURLErrorDomain && failure.code == NSURLErrorCancelled) else { return }
         showError(error.localizedDescription)
+    }
+    @objc private func pasteContent(_ sender: Any?) {
+        let clipboard = NSPasteboard.general
+        let png: Data?
+        if let data = clipboard.data(forType: .png) {
+            png = data
+        } else if let data = clipboard.data(forType: .tiff), let bitmap = NSBitmapImageRep(data: data) {
+            png = bitmap.representation(using: .png, properties: [:])
+        } else {
+            png = nil
+        }
+        guard let png else {
+            NSApp.sendAction(Selector(("paste:")), to: nil, from: sender)
+            return
+        }
+        // Let WebKit retain normal text/terminal paste everywhere except our composer.
+        let base64 = png.base64EncodedString()
+        web.evaluateJavaScript("""
+        (() => {
+            const input = document.activeElement;
+            if (!input?.matches('.message-input')) return false;
+            input.dispatchEvent(new CustomEvent('workspace-paste-image', {detail: '\(base64)'}));
+            return true;
+        })()
+        """) { handled, _ in
+            if handled as? Bool != true {
+                NSApp.sendAction(Selector(("paste:")), to: nil, from: sender)
+            }
+        }
     }
     @objc private func copyText() {
         web.evaluateJavaScript("window.clooviesSelectedText?.() || ''") { value, _ in

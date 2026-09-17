@@ -3822,3 +3822,140 @@ test("typing a single-line draft never collapses the input or resizes the termin
     });
   }
 });
+
+test("chat image paste previews, retries and delivers readable files", async ({
+  page,
+  request,
+}, info) => {
+  const existing = await (await request.get("/api/workspace")).json();
+  const project =
+    existing.projects[0] ||
+    (await (
+      await request.post("/api/workspace/projects", {
+        data: {
+          path: join(process.env.CLOOVIES_E2E_ROOT!, "Checkout"),
+          name: "Checkout",
+        },
+      })
+    ).json());
+  const created = await request.post("/api/workspace/terminals", {
+    data: { projectId: project.id, name: "Paste images", program: "claude" },
+  });
+  expect(created.ok()).toBeTruthy();
+  const session = await created.json();
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: "Show Paste images", exact: true })
+    .click();
+  const pane = page.getByRole("region", {
+    name: "Paste images terminal",
+    exact: true,
+  });
+  const input = pane.getByRole("textbox", { name: "Message to Paste images" });
+  const submit = pane.getByRole("button", {
+    name: "Send message",
+    exact: true,
+  });
+  await expect(submit).toBeEnabled();
+  const { createCanvas } = await import("canvas");
+  const canvas = createCanvas(400, 240),
+    ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#6450a0";
+  ctx.fillRect(0, 0, 400, 240);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "28px sans-serif";
+  ctx.fillText("Pasted screenshot", 35, 130);
+  const base64 = canvas.toBuffer("image/png").toString("base64");
+  await input.fill("Please review this screen");
+  await input.evaluate((node, data) => {
+    const clipboardData = new DataTransfer();
+    clipboardData.items.add(
+      new File(
+        [Uint8Array.from(atob(data), (c) => c.charCodeAt(0))],
+        "Screen.png",
+        { type: "image/png" },
+      ),
+    );
+    node.dispatchEvent(
+      new ClipboardEvent("paste", {
+        clipboardData,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  }, base64);
+  await expect(pane.locator(".composer-image")).toHaveCount(1);
+  await expect(submit).toBeEnabled();
+  await expect(input).toHaveValue("Please review this screen");
+  await pane
+    .getByRole("button", { name: "Preview Screen.png", exact: true })
+    .click();
+  const preview = page.getByRole("dialog", {
+    name: "Image preview: Screen.png",
+  });
+  await expect(preview.locator("img")).toHaveJSProperty("naturalWidth", 400);
+  await page.keyboard.press("Escape");
+  // A second attachment uses exactly the native bridge's event.
+  await input.evaluate(
+    (node, data) =>
+      node.dispatchEvent(
+        new CustomEvent("workspace-paste-image", { detail: data }),
+      ),
+    base64,
+  );
+  await expect(pane.locator(".composer-image")).toHaveCount(2);
+  await expect(submit).toBeEnabled();
+  await pane.getByRole("button", { name: "Remove Screenshot.png" }).click();
+  await expect(pane.locator(".composer-image")).toHaveCount(1);
+  await page.screenshot({ path: info.outputPath("pasted-image-draft.png") });
+  const endpoint = `**/api/workspace/terminals/${session.id}/message`;
+  await page.route(endpoint, (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Temporary send failure" }),
+    }),
+  );
+  await input.press("Enter");
+  await expect(
+    pane.getByText("Temporary send failure", { exact: true }),
+  ).toBeVisible();
+  await expect(input).toHaveValue("Please review this screen");
+  await expect(pane.locator(".composer-image")).toHaveCount(1);
+  await page.unroute(endpoint);
+  await input.press("Enter");
+  await expect(pane.locator(".composer-image")).toHaveCount(0);
+  await expect(input).toHaveValue("");
+  await expect(pane.locator(".conversation-message.assistant")).toContainText(
+    "Please review this screen",
+  );
+  const activity = await (
+    await request.get(`/api/workspace/terminals/${session.id}/activity`)
+  ).json();
+  const message = activity.messages.find((m: any) => m.role === "user").text;
+  const path = message.match(/\[Image 1\]\(<([^>]+)>\)/)[1];
+  expect(existsSync(path)).toBeTruthy();
+  const { readFileSync } = await import("node:fs");
+  expect(readFileSync(path).toString("base64")).toBe(base64);
+  await expect(pane.locator(".conversation-message.user")).toHaveCount(1);
+  await expect(
+    pane.locator(".conversation-message.user .image-preview img"),
+  ).toHaveJSProperty("naturalWidth", 400);
+  // An image-only message must also be deliverable.
+  await input.evaluate(
+    (node, data) =>
+      node.dispatchEvent(
+        new CustomEvent("workspace-paste-image", { detail: data }),
+      ),
+    base64,
+  );
+  await expect(submit).toBeEnabled();
+  await input.press("Enter");
+  await expect(
+    pane.locator(".conversation-message.assistant").last(),
+  ).toContainText("Please inspect these images");
+  await expect(pane.locator(".composer-image")).toHaveCount(0);
+  await page.screenshot({
+    path: info.outputPath("pasted-image-delivered.png"),
+  });
+});
