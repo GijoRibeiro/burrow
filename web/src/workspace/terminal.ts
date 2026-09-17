@@ -60,7 +60,8 @@ export class TerminalPane {
   private currentStatus = "";
   private activity?: Activity;
   private viewVisible = false;
-  private sending = false;
+  private pendingDeliveries = 0;
+  private deliveryQueue: Promise<unknown> = Promise.resolve();
   private frame = 0;
   private terminalScroll = { top: 0, follow: true };
   private restoringTerminalScroll = false;
@@ -533,7 +534,6 @@ export class TerminalPane {
       : "Run a shell command or send terminal input…";
     if (this.send) {
       this.send.disabled =
-        this.sending ||
         this.images.busy ||
         this.connection.textContent !== "Live" ||
         (chat && !this.activity?.canMessage);
@@ -552,8 +552,7 @@ export class TerminalPane {
     if (
       (!text.trim() && !attachments.length) ||
       this.images.busy ||
-      this.socket?.readyState !== WebSocket.OPEN ||
-      this.sending
+      this.socket?.readyState !== WebSocket.OPEN
     )
       return;
     if (attachments.length && this.appearance.view !== "agent") {
@@ -572,30 +571,49 @@ export class TerminalPane {
         );
         return;
       }
-      this.sending = true;
-      this.refreshComposer();
       this.agent.showError("");
       const message = this.images.message(text, attachments);
+      // Commit the visual send in one frame. Network acknowledgement must not
+      // clear/resize the composer a second time during the bubble's entrance.
+      this.message.value = "";
+      this.saveDraft("");
+      this.images.detach(attachments);
+      this.resizeComposer();
       const pendingId = this.agent.beginMessage(message);
+      this.fit();
+      this.focus();
+      // Accept rapid follow-ups immediately, but deliver them to the PTY in
+      // order. An in-flight request must not swallow the next Enter press.
+      this.pendingDeliveries++;
+      const delivery = this.deliveryQueue.then(() =>
+        api(`/terminals/${this.session.id}/message`, "POST", { text: message }),
+      );
+      this.deliveryQueue = delivery.catch(() => {});
       try {
         // The server rechecks the foreground process on every chat submission.
-        await api(`/terminals/${this.session.id}/message`, "POST", {
-          text: message,
-        });
+        await delivery;
         this.agent.finishMessage(pendingId, true);
-        this.images.remove(attachments);
+        this.images.release(attachments);
         clearTimeout(this.activityTimer);
         if (!this.activityRequest && this.viewVisible) void this.pollActivity();
       } catch (error) {
+        // Keep anything typed while sending and recover the failed draft too.
+        this.message.value = this.message.value
+          ? `${text}\n\n${this.message.value}`
+          : text;
+        this.saveDraft(this.message.value);
+        this.images.restore(attachments);
+        this.resizeComposer();
+        this.fit();
         this.agent.finishMessage(pendingId, false);
         this.agent.showError(
           error instanceof Error ? error.message : String(error),
         );
         return;
       } finally {
-        this.sending = false;
-        this.refreshComposer();
+        this.pendingDeliveries--;
       }
+      return;
     } else {
       this.terminal.paste(text);
       this.input("\r");
@@ -752,6 +770,6 @@ export class TerminalPane {
     this.element.remove();
   }
   get hasPendingSend(): boolean {
-    return this.sending;
+    return this.pendingDeliveries > 0;
   }
 }

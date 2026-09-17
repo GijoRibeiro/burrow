@@ -101,17 +101,16 @@ export function imagePreviews(
       "image-preview",
       "",
     );
-    card.hidden = true;
+    // Uploaded images are already validated. Reserve their preview immediately
+    // so decoding cannot expand an outgoing bubble halfway through its fade.
+    card.hidden = !path.includes(`/attachments/${terminalId}/image-`);
     const image = el("img");
     image.alt = "";
     image.decoding = "async";
     image.onload = () => {
-      const content = gallery.closest<HTMLElement>(".agent-content");
-      const follow =
-        content &&
-        content.scrollHeight - content.scrollTop - content.clientHeight < 60;
       card.hidden = false;
-      if (follow) content.scrollTop = content.scrollHeight;
+      // ConversationScroll owns following, including image reflow. A second
+      // direct scrollTop writer used to snap the viewport during the send.
     };
     image.onerror = () => card.remove();
     image.src = src;

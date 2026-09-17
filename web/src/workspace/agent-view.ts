@@ -417,17 +417,20 @@ export class AgentView {
     for (const message of this.pending) {
       const item = this.messageNode(message.id, "user", message.text, true);
       item.classList.add("pending-message", message.state);
-      const status = el(
-        "span",
-        "message-delivery",
+      let status = item.querySelector<HTMLElement>(".message-delivery");
+      if (!status) {
+        status = el("span", "message-delivery");
+        status.setAttribute("role", "status");
+        item.append(status);
+      }
+      status.removeAttribute("aria-hidden");
+      const caption =
         message.state === "sending"
           ? "Sending…"
           : message.state === "sent"
             ? "Sent to terminal"
-            : "Not sent · your draft is ready to retry",
-      );
-      status.setAttribute("role", "status");
-      item.append(status);
+            : "Not sent · retry below";
+      if (status.textContent !== caption) status.textContent = caption;
       // Keep the draft at its send position while awaiting the native receipt.
       // New replies must appear below it, not behind a permanently last bubble.
       const anchor = nodes.findIndex(
@@ -480,7 +483,11 @@ export class AgentView {
     }
     const item = cached.element;
     item.classList.remove("pending-message", "sending", "sent", "failed");
-    item.querySelector(".message-delivery")?.remove();
+    // Retain the tiny status overlay so confirmation fades without collapsing
+    // the bubble or replaying its entrance animation.
+    item
+      .querySelector(".message-delivery")
+      ?.setAttribute("aria-hidden", "true");
     if (cached.text !== text || cached.role !== role) {
       if (role !== "user" && cached.reply) {
         cached.reply.update(text, animate);
