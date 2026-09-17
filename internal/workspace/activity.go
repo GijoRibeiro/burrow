@@ -258,9 +258,11 @@ func parseConversation(data []byte) Activity {
 		a.Status = "working"
 		var text string
 		var blocks []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-			Name string `json:"name"`
+			Type      string `json:"type"`
+			Text      string `json:"text"`
+			Name      string `json:"name"`
+			Thinking  string `json:"thinking"`
+			Signature string `json:"signature"`
 		}
 		if json.Unmarshal(entry.Message.Content, &text) != nil && json.Unmarshal(entry.Message.Content, &blocks) == nil {
 			var parts []string
@@ -275,6 +277,9 @@ func parseConversation(data []byte) Activity {
 				}
 				if b.Type == "thinking" {
 					a.Status = "working"
+					if isClaudeNarration(b.Signature) {
+						parts = append(parts, b.Thinking)
+					}
 				}
 			}
 			text = strings.Join(parts, "\n\n")
