@@ -122,10 +122,17 @@ export class ConversationScroll {
         this.frame = 0;
         return;
       }
-      const fraction = 1 - Math.exp(-Math.min(64, now - previous) / 45);
+      const elapsed = Math.min(32, Math.max(1, now - previous));
+      const fraction = 1 - Math.exp(-elapsed / 90);
+      // A long reply can add thousands of pixels in one transcript poll.
+      // Cap the travel speed so following it never starts with a sudden jump.
       const distance =
         Math.sign(gap) *
-        Math.min(Math.abs(gap), Math.max(1, Math.abs(gap) * fraction));
+        Math.min(
+          Math.abs(gap),
+          elapsed * 2,
+          Math.max(1, Math.abs(gap) * fraction),
+        );
       this.write(this.viewport.scrollTop + distance);
       previous = now;
       this.frame = requestAnimationFrame(step);

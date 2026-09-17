@@ -207,13 +207,13 @@ it("keeps existing message DOM and reconciles outgoing arrivals without replayin
   expect(articles[0]).toBe(original);
   expect(articles[1]).toBe(pending);
   expect(articles[1].querySelector(".message-delivery")).toBeNull();
-  expect(articles[2].classList.contains("message-arrival")).toBe(true);
+  expect(articles[2].classList.contains("message-arrival")).toBe(false);
   const lines = articles[2].querySelectorAll<HTMLElement>(
-    ".message-line-arrival",
+    ".reply-chunk-arrival",
   );
-  expect(lines).toHaveLength(2);
+  expect(lines).toHaveLength(4);
   expect(
-    [...lines].map((line) => line.style.getPropertyValue("--arrival-delay")),
-  ).toEqual(["0ms", "28ms"]);
+    [...lines].map((line) => line.style.getPropertyValue("--reveal-delay")),
+  ).toEqual(["0ms", "45ms", "90ms", "135ms"]);
   view.dispose();
 });

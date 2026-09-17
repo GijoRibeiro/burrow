@@ -123,3 +123,75 @@ it("does not recreate removed workers from their task or canceled assignment", (
   } as unknown as Workspace;
   expect(teamNodes(state).map((n) => n.id)).toEqual(["head"]);
 });
+
+it("signals a reply request three times without restarting on unrelated canvas updates", () => {
+  localStorage.clear();
+  let now = 1000;
+  const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
+  const state = {
+    projects: [],
+    tasks: [],
+    plans: [],
+    terminals: [
+      {
+        id: "solo",
+        name: "Companion",
+        program: "claude",
+        status: "running",
+        liveStatus: "idle",
+      },
+    ],
+  } as unknown as Workspace;
+  const graph = new TeamGraph({
+    state: () => state,
+    color: () => "#ac8fff",
+    creature: () => "Grook",
+    select: () => {},
+    newHead: () => {},
+    newAgent: () => {},
+    review: () => {},
+    task: () => {},
+    menu: () => {},
+  });
+  const card = () => graph.element.querySelector<HTMLElement>(".team-node")!;
+  try {
+    graph.update("");
+    expect(card().classList.contains("attention-pulse")).toBe(false);
+    state.terminals[0].liveStatus = "waiting";
+    graph.update("");
+    expect(card().textContent).toContain("Needs your reply");
+    expect(card().classList.contains("attention-pulse")).toBe(true);
+    expect(
+      graph.element.querySelector(".team-overview")?.textContent,
+    ).toContain("1 need an answer");
+    now += 1000;
+    state.terminals[0].name = "Renamed";
+    graph.update("");
+    expect(card().style.getPropertyValue("--attention-delay")).toBe("-1000ms");
+    now += 6000;
+    state.terminals[0].name = "Renamed again";
+    graph.update("");
+    expect(card().classList.contains("attention-pulse")).toBe(false);
+    expect(card().classList.contains("needs-reply")).toBe(true);
+    state.terminals[0].liveStatus = "working";
+    graph.update("");
+    expect(card().classList.contains("needs-reply")).toBe(false);
+    state.terminals[0].liveStatus = "waiting";
+    graph.update("");
+    expect(card().classList.contains("attention-pulse")).toBe(true);
+    expect(card().style.getPropertyValue("--attention-delay")).toBe("0ms");
+    state.terminals[0].status = "stopped";
+    graph.update("");
+    expect(card().classList.contains("needs-reply")).toBe(false);
+  } finally {
+    clock.mockRestore();
+    vi.unstubAllGlobals();
+  }
+});

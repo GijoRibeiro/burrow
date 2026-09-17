@@ -1,8 +1,9 @@
 import { ConversationScroll } from "./conversation-scroll";
 import { busyPhrases } from "./busy-phrases";
 import { renderChatMarkdown } from "./chat-markdown";
+import { ReplyReveal } from "./reply-reveal";
 import { el, button } from "./dom";
-import { imagePreviews } from "./image-previews";
+import { imagePaths, imagePreviews } from "./image-previews";
 import { creature } from "./creature";
 import claudeIcon from "../../assets/brands/claude.svg";
 import codexIcon from "../../assets/brands/openai.svg";
@@ -23,7 +24,12 @@ export interface Activity {
 export class AgentView {
   readonly element = el("div", "agent-view");
   readonly heading = el("div", "agent-heading");
-  private avatar = el("div", "agent-avatar");
+  private avatar = button(
+    "Customize terminal",
+    () => this.onCustomize?.(),
+    "agent-avatar",
+    "",
+  );
   private label = el("span", "agent-status-label", "Ready");
   private detail = el("span", "agent-detail", "Shell · live output");
   private content = el("div", "agent-content");
@@ -37,7 +43,7 @@ export class AgentView {
   private scroller: ConversationScroll;
   private messageNodes = new Map<
     string,
-    { element: HTMLElement; text: string; role: string }
+    { element: HTMLElement; text: string; role: string; reply?: ReplyReveal }
   >();
   private messageKeys = new Map<string, string>();
   private receivedActivity = false;
@@ -77,6 +83,7 @@ export class AgentView {
     private openTerminal: () => void,
     private startAgent: (program: "claude" | "codex") => Promise<void>,
     interrupt: () => void,
+    private onCustomize?: () => void,
   ) {
     this.name = name;
     this.interruptButton = button(
@@ -427,11 +434,10 @@ export class AgentView {
     animate: boolean,
   ): HTMLElement {
     let cached = this.messageNodes.get(id);
-    const arriving = !cached && animate;
     if (!cached) {
       const element = el("article", `conversation-message ${role}`);
       element.dataset.messageId = id;
-      if (animate) element.classList.add("message-arrival");
+      if (animate && role === "user") element.classList.add("message-arrival");
       cached = { element, text: "", role: "" };
       this.messageNodes.set(id, cached);
     }
@@ -439,26 +445,25 @@ export class AgentView {
     item.classList.remove("pending-message", "sending", "sent", "failed");
     item.querySelector(".message-delivery")?.remove();
     if (cached.text !== text || cached.role !== role) {
-      const body = renderChatMarkdown(text);
-      if (arriving) {
-        const selector = "p,h1,h2,h3,h4,h5,h6,li,pre,.message-table";
-        const lines = [...body.querySelectorAll<HTMLElement>(selector)].filter(
-          (line) => !line.querySelector(selector),
+      if (role !== "user" && cached.reply) {
+        cached.reply.update(text);
+      } else {
+        cached.reply =
+          role === "user" ? undefined : new ReplyReveal(text, animate);
+        item.replaceChildren(
+          el("span", "message-role", role === "user" ? "YOU" : "CLAUDE"),
+          cached.reply?.element || renderChatMarkdown(text),
         );
-        for (const [index, line] of lines.entries()) {
-          line.classList.add("message-line-arrival");
-          line.style.setProperty(
-            "--arrival-delay",
-            `${Math.min(index * 28, 196)}ms`,
-          );
-        }
       }
-      item.replaceChildren(
-        el("span", "message-role", role === "user" ? "YOU" : "CLAUDE"),
-        body,
-      );
-      const previews = imagePreviews(this.terminalId, text);
-      if (previews) item.append(previews);
+      const paths = imagePaths(text);
+      if (
+        JSON.stringify(imagePaths(cached.text)) !== JSON.stringify(paths) ||
+        (paths.length > 0 && !item.querySelector(".image-previews"))
+      ) {
+        item.querySelector(".image-previews")?.remove();
+        const previews = imagePreviews(this.terminalId, text);
+        if (previews) item.append(previews);
+      }
       cached.text = text;
       cached.role = role;
     }

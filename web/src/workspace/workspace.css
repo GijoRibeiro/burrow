@@ -1129,15 +1129,6 @@ textarea {
 .pane-controls .stop-button {
   font-size: 10px;
 }
-.pane-creature {
-  padding: 0;
-  width: 24px;
-  height: 28px;
-  background: var(--bg);
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-}
 .pane-context {
   height: 26px;
   min-height: 26px;
@@ -1260,7 +1251,7 @@ textarea {
 }
 :is(.is-thinking, .is-working) .creature-frame,
 .session-creature.working .creature-frame,
-.pane-creature:hover .creature-frame,
+.agent-avatar:hover .creature-frame,
 .creature-choice:hover .creature-frame {
   animation: var(--sprite-sequence) var(--sprite-duration) steps(1, end)
     infinite;
@@ -1661,9 +1652,6 @@ textarea {
   );
 }
 .creature {
-  color: var(--terminal-color);
-}
-.pane-creature {
   color: var(--terminal-color);
 }
 .session-row.visible {
@@ -2674,8 +2662,45 @@ textarea {
 .composer-activity .agent-info {
   flex: 1;
 }
+.composer-activity .agent-avatar {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--terminal-color);
+  cursor: pointer;
+  border-radius: 3px;
+}
+.composer-activity .agent-avatar:focus-visible {
+  outline: 1px solid var(--terminal-color);
+  outline-offset: 3px;
+}
 .composer-activity .agent-status-label {
   line-height: 1.4;
+}
+/* A soft light passes through the words, as in the original Bitwise label. */
+.composer-activity.is-thinking .agent-status-label {
+  background-image: linear-gradient(
+    90deg,
+    var(--terminal-color) 0%,
+    var(--terminal-color) 40%,
+    var(--ink) 50%,
+    var(--terminal-color) 60%,
+    var(--terminal-color) 100%
+  );
+  background-size: 300% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: working-highlight 4s linear infinite;
+}
+@keyframes working-highlight {
+  from {
+    background-position: 150% 0;
+  }
+  to {
+    background-position: -150% 0;
+  }
 }
 .pane-controls .view-switcher {
   margin-right: 5px;
@@ -2684,8 +2709,10 @@ textarea {
   padding: 4px 6px;
 }
 @media (prefers-reduced-motion: reduce) {
-  .composer-activity.is-thinking .agent-avatar {
-    animation: none;
+  .composer-activity.is-thinking .agent-status-label {
+    background-image: none;
+    color: var(--terminal-color);
+    -webkit-text-fill-color: currentColor;
   }
 }
 .pane-controls .view-button {
@@ -2748,12 +2775,12 @@ textarea {
   display: flow-root;
 }
 .message-arrival {
-  animation: message-arrive 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: message-arrive 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 @keyframes message-arrive {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(12px);
   }
   to {
     opacity: 1;
@@ -2818,22 +2845,20 @@ textarea {
   overflow-wrap: break-word;
   contain: layout style paint;
 }
-.message-line-arrival {
-  animation: message-line-arrive 340ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
-  animation-delay: var(--arrival-delay, 0ms);
+.reply-chunk-arrival {
+  animation: reply-reveal 360ms ease-out both;
+  animation-delay: var(--reveal-delay, 0ms);
 }
-@keyframes message-line-arrive {
+@keyframes reply-reveal {
   from {
     opacity: 0;
-    transform: translateY(4px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .message-line-arrival {
+  .reply-chunk-arrival {
     animation: none;
   }
 }

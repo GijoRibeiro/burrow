@@ -87,6 +87,13 @@ export function arrangeTeam(
   for (const n of nodes) visit(n, 0);
   return positions;
 }
+function needsReply(node: GraphNode): boolean {
+  return (
+    node.session?.status === "running" &&
+    (node.session.liveStatus === "waiting" || node.task?.status === "waiting")
+  );
+}
+const ATTENTION_DURATION = 5400;
 const STORE = "burrow.team-canvas.v1";
 const svg = <K extends keyof SVGElementTagNameMap>(name: K) =>
   document.createElementNS("http://www.w3.org/2000/svg", name);
@@ -104,6 +111,7 @@ export class TeamGraph {
   private viewport = { x: 0, y: 0, scale: 1 };
   private nodes: GraphNode[] = [];
   private signature = "";
+  private attentionStarted = new Map<string, number>();
   private selected = "";
   private headFilter = "";
   private teamSelect = el("select", "team-selector");
@@ -325,6 +333,12 @@ export class TeamGraph {
     }
     this.signature = key;
     const all = teamNodes(state);
+    const waitingIds = new Set(all.filter(needsReply).map((n) => n.id));
+    for (const id of this.attentionStarted.keys())
+      if (!waitingIds.has(id)) this.attentionStarted.delete(id);
+    for (const id of waitingIds)
+      if (!this.attentionStarted.has(id))
+        this.attentionStarted.set(id, performance.now());
     this.nodes = this.headFilter
       ? all.filter((n) => this.belongsTo(n, this.headFilter, all))
       : all;
@@ -357,13 +371,13 @@ export class TeamGraph {
       else this.positions[node.id] ||= defaults[node.id];
     }
     const shown = new Set(this.nodes.map((n) => n.id));
-    const working = state.terminals.filter(
-      (t) =>
-        shown.has(t.id) && t.status === "running" && t.liveStatus === "working",
+    const working = this.nodes.filter(
+      (node) =>
+        node.session?.status === "running" &&
+        node.session.liveStatus === "working" &&
+        !needsReply(node),
     ).length;
-    const waiting =
-      state.tasks?.filter((t) => shown.has(t.agentId) && t.status === "waiting")
-        .length || 0;
+    const waiting = this.nodes.filter(needsReply).length;
     const headCount = state.terminals.filter(
       (t) => shown.has(t.id) && t.role === "head",
     ).length;
@@ -525,13 +539,24 @@ export class TeamGraph {
                 : node.task
                   ? "Working"
                   : "Available";
+    const waiting = needsReply(node);
+    card.classList.toggle("needs-reply", waiting);
+    if (waiting) {
+      const elapsed =
+        performance.now() -
+        (this.attentionStarted.get(node.id) ?? performance.now());
+      if (elapsed < ATTENTION_DURATION) {
+        card.classList.add("attention-pulse");
+        card.style.setProperty("--attention-delay", `${-elapsed}ms`);
+      }
+    }
     const liveWorking =
+      !waiting &&
       node.session?.status === "running" &&
       node.session?.liveStatus === "working";
     card.classList.toggle("is-working", liveWorking);
     if (liveWorking) status = "Working now";
-    else if (node.session?.liveStatus === "waiting")
-      status = "Needs your attention";
+    else if (waiting) status = "Needs your reply";
     else if (
       node.session?.liveStatus === "idle" &&
       !["done", "waiting", "canceled"].includes(node.task?.status || "")
