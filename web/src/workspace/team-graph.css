@@ -632,3 +632,72 @@
     margin-bottom: 6px;
   }
 }
+
+/* Three gentle passes when a question arrives, then a quiet persistent cue. */
+.team-node.needs-reply {
+  border-color: var(--node-color);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--node-color) 12%, transparent);
+}
+.team-node.needs-reply .team-node-footer {
+  color: var(--node-color);
+}
+.team-node.attention-pulse::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(
+    110deg,
+    transparent 35%,
+    color-mix(in srgb, var(--node-color) 12%, transparent) 47%,
+    color-mix(in srgb, var(--ink) 10%, transparent) 50%,
+    color-mix(in srgb, var(--node-color) 12%, transparent) 53%,
+    transparent 65%
+  );
+  background-size: 300% 100%;
+  animation: team-attention-sweep 1.8s ease-in-out 3;
+  animation-delay: var(--attention-delay, 0ms);
+}
+.team-node.attention-pulse .team-node-state {
+  background: linear-gradient(
+    90deg,
+    var(--node-color) 40%,
+    var(--ink) 50%,
+    var(--node-color) 60%
+  );
+  background-size: 300% 100%;
+  background-position: 150% 0;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: working-highlight 1.8s linear 3;
+  animation-delay: var(--attention-delay, 0ms);
+}
+@keyframes team-attention-sweep {
+  0% {
+    opacity: 0;
+    background-position: 150% 0;
+  }
+  25%,
+  65% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    background-position: -150% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .team-node.attention-pulse::after {
+    animation: none;
+  }
+  .team-node.attention-pulse .team-node-state {
+    animation: none;
+    background: none;
+    color: var(--node-color);
+    -webkit-text-fill-color: currentColor;
+  }
+}

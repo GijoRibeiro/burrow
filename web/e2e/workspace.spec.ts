@@ -2899,6 +2899,7 @@ test("canvas keeps conversations warm, sends immediately, pins two agents and re
       ).json(),
     );
   const [head, worker] = agents;
+  let workerStatus = "working";
   await page.route("**/api/workspace", async (route) => {
     const response = await route.fetch();
     const s = await response.json();
@@ -2906,7 +2907,7 @@ test("canvas keeps conversations warm, sends immediately, pins two agents and re
       t.id === head.id
         ? { ...t, role: "head", liveStatus: "idle" }
         : t.id === worker.id
-          ? { ...t, headId: head.id, liveStatus: "working" }
+          ? { ...t, headId: head.id, liveStatus: workerStatus }
           : t,
     );
     await route.fulfill({ json: s });
@@ -3063,6 +3064,32 @@ test("canvas keeps conversations warm, sends immediately, pins two agents and re
     "animation-name",
     "creature-poses-2",
   );
+  workerStatus = "waiting";
+  await expect(card).toHaveClass(/needs-reply/);
+  await expect(card).toContainText("Needs your reply");
+  const attention = await card.evaluate((el) => {
+    const style = getComputedStyle(el, "::after");
+    return {
+      name: style.animationName,
+      count: style.animationIterationCount,
+      pointer: style.pointerEvents,
+    };
+  });
+  expect(attention).toEqual({
+    name: "team-attention-sweep",
+    count: "3",
+    pointer: "none",
+  });
+  await page.screenshot({ path: info.outputPath("reply-needed-canvas.png") });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  expect(
+    await card.evaluate((el) => getComputedStyle(el, "::after").animationName),
+  ).toBe("none");
+  await expect(card.locator(".team-node-state")).not.toHaveCSS(
+    "-webkit-text-fill-color",
+    "rgba(0, 0, 0, 0)",
+  );
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   await expect(page.locator(".team-task-link")).toHaveCount(0);
   await expect(page.locator(".team-wires path")).toHaveCSS(
     "stroke-dasharray",
@@ -3369,6 +3396,15 @@ test("chat follows arrivals and reflow, pauses for history and resumes on send",
       .locator("article")
       .first()
       .evaluate((el) => ((window as any).__originalMessage = el));
+    await content.evaluate((el) => {
+      const probe = { positions: [] as number[], active: true };
+      (window as any).__scrollProbe = probe;
+      const sample = () => {
+        probe.positions.push(el.scrollTop);
+        if (probe.active) requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
     activity.messages.push({
       id: "reply-one",
       role: "assistant",
@@ -3382,9 +3418,68 @@ test("chat follows arrivals and reflow, pauses for history and resumes on send",
         .first()
         .evaluate((el) => el === (window as any).__originalMessage),
     ).toBe(true);
-    await expect(
-      content.locator('article[data-message-id="reply-one"]'),
-    ).toHaveCSS("animation-name", "message-arrive");
+    const largestStep = await page.evaluate(() => {
+      const probe = (window as any).__scrollProbe;
+      probe.active = false;
+      return Math.max(
+        ...probe.positions
+          .slice(1)
+          .map((top: number, i: number) => Math.abs(top - probe.positions[i])),
+      );
+    });
+    expect(largestStep).toBeLessThanOrEqual(65);
+    const reply = content.locator('article[data-message-id="reply-one"]');
+    await expect(reply).toHaveCSS("animation-name", "none");
+    const chunks = reply.locator(".reply-chunk-arrival");
+    await expect(chunks.first()).toHaveCSS("animation-name", "reply-reveal");
+    const reveal = await reply.evaluate((el) => {
+      const pieces = [
+        ...el.querySelectorAll<HTMLElement>(".reply-chunk-arrival"),
+      ];
+      const rect = () =>
+        JSON.stringify(
+          pieces.map((p) => {
+            const r = p.getBoundingClientRect();
+            return [r.x, r.y, r.width, r.height];
+          }),
+        );
+      for (const piece of pieces)
+        for (const a of piece.getAnimations()) {
+          a.pause();
+          a.currentTime = 0;
+        }
+      const before = rect();
+      for (const piece of pieces)
+        for (const a of piece.getAnimations()) a.currentTime = 180;
+      (window as any).__firstChunk = pieces[0];
+      (window as any).__firstAnimation = pieces[0].getAnimations()[0];
+      return {
+        before,
+        after: rect(),
+        first: Number(getComputedStyle(pieces[0]).opacity),
+        last: Number(getComputedStyle(pieces.at(-1)!).opacity),
+        delay: parseFloat(
+          pieces.at(-1)!.style.getPropertyValue("--reveal-delay"),
+        ),
+      };
+    });
+    expect(reveal.before).toEqual(reveal.after);
+    expect(reveal.first).toBeGreaterThan(reveal.last);
+    expect(reveal.delay).toBeLessThanOrEqual(850);
+    activity.messages.at(-1)!.text += " A newly streamed ending.";
+    await expect(reply).toContainText("A newly streamed ending.");
+    expect(
+      await chunks
+        .first()
+        .evaluate(
+          (el) =>
+            el === (window as any).__firstChunk &&
+            el.getAnimations()[0] === (window as any).__firstAnimation,
+        ),
+    ).toBe(true);
+    await reply.evaluate((el) => {
+      for (const a of el.getAnimations({ subtree: true })) a.finish();
+    });
     // Delayed layout growth used to turn following off before the next message.
     await content
       .locator("article")
@@ -3451,6 +3546,31 @@ test("chat follows arrivals and reflow, pauses for history and resumes on send",
     activity.status = "working";
     const avatar = pane.locator(".composer-activity .creature");
     await expect(pane.locator(".composer-activity")).toHaveClass(/is-thinking/);
+    await expect(pane.locator(".pane-header .creature")).toHaveCount(0);
+    await expect(pane.locator(".composer-activity .creature")).toHaveCount(1);
+    await expect(
+      pane.locator(".composer-activity").getByRole("button", {
+        name: "Customize terminal",
+        exact: true,
+      }),
+    ).toBeVisible();
+    const label = pane.locator(".composer-activity .agent-status-label");
+    await expect(label).toHaveCSS("animation-name", "working-highlight");
+    const sweep = await label.evaluate((el) => {
+      const animation = el.getAnimations()[0];
+      animation.pause();
+      animation.currentTime = 1000;
+      const before = getComputedStyle(el).backgroundPosition;
+      animation.currentTime = 2000;
+      return {
+        before,
+        after: getComputedStyle(el).backgroundPosition,
+        clipping: getComputedStyle(el).backgroundClip,
+      };
+    });
+    expect(sweep.before).not.toEqual(sweep.after);
+    expect(sweep.clipping).toBe("text");
+    await page.screenshot({ path: info.outputPath("working-highlight.png") });
     const poses = await avatar.evaluate((el) => {
       const frames = [...el.querySelectorAll<HTMLElement>(".creature-frame")];
       const sample = (time: number) => {
@@ -3471,6 +3591,11 @@ test("chat follows arrivals and reflow, pauses for history and resumes on send",
     await expect(pane.locator(".composer-activity")).not.toHaveClass(
       /is-thinking/,
     );
+    await expect(label).toHaveCSS("animation-name", "none");
+    await expect(label).not.toHaveCSS(
+      "-webkit-text-fill-color",
+      "rgba(0, 0, 0, 0)",
+    );
     await expect(avatar.locator(".creature-frame").first()).toHaveCSS(
       "opacity",
       "1",
@@ -3481,6 +3606,13 @@ test("chat follows arrivals and reflow, pauses for history and resumes on send",
     );
     activity.status = "working";
     await page.emulateMedia({ reducedMotion: "reduce" });
+    await expect(pane.locator(".composer-activity")).toHaveClass(/is-thinking/);
+    await expect(label).toHaveCSS("animation-name", "none");
+    await expect(label).toHaveCSS("background-image", "none");
+    await expect(label).not.toHaveCSS(
+      "-webkit-text-fill-color",
+      "rgba(0, 0, 0, 0)",
+    );
     await expect(avatar.locator(".creature-frame").first()).toHaveCSS(
       "animation-name",
       "none",

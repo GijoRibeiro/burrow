@@ -9,12 +9,7 @@ import terminalIcon from "../../assets/icons/terminal.svg";
 import { button, el } from "./dom";
 import type { Project, Session } from "./types";
 import { AgentView, type Activity } from "./agent-view";
-import {
-  creature,
-  defaultCreature,
-  chooseCreature,
-  terminalColor,
-} from "./creature";
+import { defaultCreature, chooseCreature, terminalColor } from "./creature";
 export interface PaneAppearance {
   color: string;
   view: "agent" | "terminal";
@@ -90,6 +85,7 @@ export class TerminalPane {
       () => {
         this.input("\x1b");
       },
+      () => this.customize(),
     );
     if (session.program === "claude" || session.program === "codex") {
       this.agent.setActivity({
@@ -113,30 +109,7 @@ export class TerminalPane {
     const header = el("header", "pane-header");
     header.draggable = true;
     const identity = el("div", "pane-identity");
-    const avatar = button(
-      "Customize terminal",
-      () =>
-        chooseCreature(
-          this.appearance.creature,
-          (name) => {
-            this.appearance.creature = name;
-            avatar.replaceChildren(creature(name));
-            this.agent.setCreature(name);
-            actions.appearance({ ...this.appearance });
-          },
-          this.appearance.color,
-          (color) => {
-            this.appearance.color = color;
-            this.element.style.setProperty("--terminal-color", color);
-            actions.appearance({ ...this.appearance });
-          },
-        ),
-      "pane-creature",
-      "",
-    );
-    avatar.append(creature(this.appearance.creature));
     identity.append(
-      avatar,
       el("span", "pane-project", project.name),
       el("span", "slash", "/"),
       this.name,
@@ -315,6 +288,22 @@ export class TerminalPane {
   private captureTerminalScroll(): void {
     const b = this.terminal.buffer.active;
     this.terminalScroll = { top: b.viewportY, follow: b.viewportY >= b.baseY };
+  }
+  private customize(): void {
+    chooseCreature(
+      this.appearance.creature,
+      (name) => {
+        this.appearance.creature = name;
+        this.agent.setCreature(name);
+        this.actions.appearance({ ...this.appearance });
+      },
+      this.appearance.color,
+      (color) => {
+        this.appearance.color = color;
+        this.element.style.setProperty("--terminal-color", color);
+        this.actions.appearance({ ...this.appearance });
+      },
+    );
   }
   captureScroll(): void {
     this.agent.captureScroll();
