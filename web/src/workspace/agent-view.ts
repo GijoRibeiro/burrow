@@ -53,6 +53,7 @@ export class AgentView {
     "terminal-notice",
     "Input needed · Open terminal →",
   );
+  private notices = el("div", "agent-notices");
   private error = el("p", "agent-error");
   private launching = false;
   private progressKey = "";
@@ -89,7 +90,7 @@ export class AgentView {
     this.interruptButton = button(
       "Interrupt current response",
       interrupt,
-      "terminal-notice",
+      "terminal-notice interrupt-notice",
       "Interrupt response",
     );
     this.interruptButton.hidden = true;
@@ -112,13 +113,9 @@ export class AgentView {
     );
     this.content.setAttribute("aria-label", "Agent conversation and output");
     this.error.setAttribute("role", "alert");
-    this.element.append(
-      this.notice,
-      this.interruptButton,
-      this.error,
-      this.content,
-      this.latest,
-    );
+    this.notices.hidden = true;
+    this.notices.append(this.notice, this.interruptButton);
+    this.element.append(this.notices, this.error, this.content, this.latest);
     this.setCreature(name);
   }
   captureScroll(): void {
@@ -241,6 +238,7 @@ export class AgentView {
         ? "Provider needs attention · Open terminal →"
         : "No new progress for a minute · Open terminal →";
     this.interruptButton.hidden = !stalled;
+    this.notices.hidden = this.notice.hidden && this.interruptButton.hidden;
     const label = !live
       ? this.connection
       : this.refreshFailed
