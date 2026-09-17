@@ -564,6 +564,8 @@ class WorkspaceApp {
       },
       (name, value) => (name === "ratio" ? undefined : value),
     );
+    if (key !== this.canvasKey)
+      for (const pane of this.panes.values()) pane.settleArrivals();
     const animate =
       key !== this.canvasKey
         ? captureLayout(

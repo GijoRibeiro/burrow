@@ -18,7 +18,7 @@ export class ReplyReveal {
     this.animated = true;
   }
 
-  update(markdown: string): void {
+  update(markdown: string, animate = true): void {
     const next = renderChatMarkdown(markdown);
     const text = next.textContent || "";
     let unchanged = 0;
@@ -27,7 +27,7 @@ export class ReplyReveal {
       this.text[unchanged] === text[unchanged]
     )
       unchanged++;
-    if (this.animated) {
+    if (this.animated && animate) {
       const walker = document.createTreeWalker(next, NodeFilter.SHOW_TEXT);
       const leaves: Text[] = [];
       while (walker.nextNode()) leaves.push(walker.currentNode as Text);

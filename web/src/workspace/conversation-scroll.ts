@@ -107,7 +107,10 @@ export class ConversationScroll {
       this.write(this.position);
       return;
     }
-    if (this.frame) return;
+    if (this.frame) {
+      if (smooth) return;
+      this.stop();
+    }
     const reduced =
       typeof matchMedia !== "undefined" &&
       matchMedia("(prefers-reduced-motion: reduce)").matches;

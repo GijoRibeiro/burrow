@@ -3369,9 +3369,11 @@ test("chat follows arrivals and reflow, pauses for history and resumes on send",
       text: `History ${i}\n\n${"A readable conversation with enough room to test scrolling. ".repeat(8)}`,
     })),
   };
-  await page.route(`**/terminals/${terminal.id}/activity`, (route) =>
-    route.fulfill({ json: activity }),
-  );
+  let activityGate: Promise<void> | undefined;
+  await page.route(`**/terminals/${terminal.id}/activity`, async (route) => {
+    if (activityGate) await activityGate;
+    await route.fulfill({ json: activity });
+  });
   await page.route(`**/terminals/${terminal.id}/message`, (route) =>
     route.fulfill({ json: {} }),
   );
@@ -3399,6 +3401,16 @@ test("chat follows arrivals and reflow, pauses for history and resumes on send",
     await content.evaluate((el) => {
       const probe = { positions: [] as number[], active: true };
       (window as any).__scrollProbe = probe;
+      const arrivals = new MutationObserver(() => {
+        const reply = el.querySelector('article[data-message-id="reply-one"]');
+        if (!reply) return;
+        for (const animation of reply.getAnimations({ subtree: true })) {
+          animation.pause();
+          animation.currentTime = 0;
+        }
+        arrivals.disconnect();
+      });
+      arrivals.observe(el, { childList: true, subtree: true });
       const sample = () => {
         probe.positions.push(el.scrollTop);
         if (probe.active) requestAnimationFrame(sample);
@@ -3574,6 +3586,53 @@ test("chat follows arrivals and reflow, pauses for history and resumes on send",
     expect(
       Math.abs(bubbleBox!.x + bubbleBox!.width - column!.x - column!.width),
     ).toBeLessThan(2);
+    await expect(
+      content.locator(".message-arrival, .reply-chunk-arrival"),
+    ).toHaveCount(0);
+    let releaseActivity!: () => void;
+    activityGate = new Promise<void>((resolve) => {
+      releaseActivity = resolve;
+    });
+    await pane
+      .getByRole("button", { name: "Hide terminal", exact: true })
+      .click();
+    activity.messages.push({
+      id: "away-backlog",
+      role: "assistant",
+      text:
+        "Backlog received while away. " +
+        "A long reply from the background. ".repeat(160),
+    });
+    await page
+      .getByRole("button", { name: "Show Following fixture", exact: true })
+      .click();
+    await expect(pane).toBeVisible();
+    await content.evaluate((el) => {
+      const observer = new MutationObserver(() => {
+        if (!el.querySelector('[data-message-id="away-backlog"]')) return;
+        (window as any).__reopenGap =
+          el.scrollHeight - el.scrollTop - el.clientHeight;
+        observer.disconnect();
+      });
+      observer.observe(el, { childList: true, subtree: true });
+    });
+    releaseActivity();
+    activityGate = undefined;
+    await expect(content).toContainText("Backlog received while away.");
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__reopenGap))
+      .toBeLessThan(2);
+    await expect(
+      content.locator(".message-arrival, .reply-chunk-arrival"),
+    ).toHaveCount(0);
+    await pane
+      .getByRole("button", { name: "Terminal view", exact: true })
+      .click();
+    await pane.getByRole("button", { name: "Agent view", exact: true }).click();
+    await expect.poll(gap).toBeLessThan(2);
+    await expect(
+      content.locator(".message-arrival, .reply-chunk-arrival"),
+    ).toHaveCount(0);
     activity.status = "working";
     const avatar = pane.locator(".composer-activity .creature");
     await expect(pane.locator(".composer-activity")).toHaveClass(/is-thinking/);
