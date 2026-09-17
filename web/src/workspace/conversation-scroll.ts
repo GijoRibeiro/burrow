@@ -97,10 +97,11 @@ export class ConversationScroll {
     if (this.following) this.restore(true);
   }
   latest() {
+    this.stop();
     this.setFollowing(true);
-    this.restore(true);
+    this.restore(true, true);
   }
-  restore(smooth = false) {
+  restore(smooth = false, catchUp = false) {
     if (!this.viewport.isConnected || !this.viewport.clientHeight) return;
     if (!this.following) {
       this.write(this.position);
@@ -114,8 +115,19 @@ export class ConversationScroll {
       this.write(this.bottom());
       return;
     }
-    let previous = performance.now();
+    const started = performance.now();
+    const origin = this.viewport.scrollTop;
+    let previous = started;
     const step = (now: number) => {
+      // Explicitly asking for the latest turn should take the same brief time,
+      // whether the reader is one paragraph or a hundred messages behind.
+      if (catchUp) {
+        const progress = Math.min(1, (now - started) / 180);
+        const eased = 1 - (1 - progress) ** 3;
+        this.write(origin + (this.bottom() - origin) * eased);
+        this.frame = progress < 1 ? requestAnimationFrame(step) : 0;
+        return;
+      }
       const gap = this.bottom() - this.viewport.scrollTop;
       if (Math.abs(gap) < 1.5 || !this.visible) {
         this.write(this.bottom());

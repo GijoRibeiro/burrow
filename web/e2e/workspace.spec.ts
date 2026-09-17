@@ -3516,7 +3516,38 @@ test("chat follows arrivals and reflow, pauses for history and resumes on send",
     await expect
       .poll(() => content.evaluate((el) => el.scrollTop))
       .toBeCloseTo(top, 0);
+    // Catching up from deep history is a brief action, not a slow scroll tour.
+    await content.evaluate((el) => {
+      el.scrollTop = 0;
+      el.dispatchEvent(new Event("scroll"));
+    });
+    await expect.poll(gap).toBeGreaterThan(3000);
+    await latest.evaluate((button) => {
+      button.addEventListener(
+        "click",
+        () => {
+          const viewport =
+            button.parentElement!.querySelector(".agent-content")!;
+          const started = performance.now();
+          const sample = () => {
+            const gap =
+              viewport.scrollHeight -
+              viewport.scrollTop -
+              viewport.clientHeight;
+            if (gap < 2)
+              (window as any).__catchUpDuration = performance.now() - started;
+            else if (performance.now() - started < 2000)
+              requestAnimationFrame(sample);
+          };
+          requestAnimationFrame(sample);
+        },
+        { once: true },
+      );
+    });
     await latest.click();
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__catchUpDuration))
+      .toBeLessThan(400);
     await expect.poll(gap).toBeLessThan(2);
     await content.hover();
     await page.mouse.wheel(0, -600);
