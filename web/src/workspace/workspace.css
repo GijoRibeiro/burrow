@@ -1251,35 +1251,23 @@ textarea {
   -webkit-mask-size: 100% 100%;
   -webkit-mask-repeat: no-repeat;
 }
-.creature .frame-2 {
-  visibility: hidden;
+.creature-frame {
+  opacity: 0;
+  mask-mode: alpha;
 }
-.pane-creature:hover .frame-1,
-.creature-choice:hover .frame-1,
-.is-thinking .frame-1 {
-  animation: creature-first 900ms steps(1) infinite;
+.creature-frame:first-child {
+  opacity: 1;
 }
-.pane-creature:hover .frame-2,
-.creature-choice:hover .frame-2,
-.is-thinking .frame-2 {
-  animation: creature-second 900ms steps(1) infinite;
+:is(.is-thinking, .is-working) .creature-frame,
+.session-creature.working .creature-frame,
+.pane-creature:hover .creature-frame,
+.creature-choice:hover .creature-frame {
+  animation: var(--sprite-sequence) var(--sprite-duration) steps(1, end)
+    infinite;
 }
-@keyframes creature-first {
-  0%,
-  100% {
-    visibility: visible;
-  }
-  50% {
-    visibility: hidden;
-  }
-}
-@keyframes creature-second {
-  0%,
-  100% {
-    visibility: hidden;
-  }
-  50% {
-    visibility: visible;
+@media (prefers-reduced-motion: reduce) {
+  .creature .creature-frame {
+    animation: none !important;
   }
 }
 .session-creature.stopped,
@@ -2689,9 +2677,6 @@ textarea {
 .composer-activity .agent-status-label {
   line-height: 1.4;
 }
-.composer-activity.is-thinking .agent-avatar {
-  animation: agent-busy-hop 1s steps(2, end) infinite;
-}
 .pane-controls .view-switcher {
   margin-right: 5px;
 }
@@ -2753,4 +2738,102 @@ textarea {
 }
 .hosted-apps-toggle.has-apps {
   color: var(--terminal-color);
+}
+
+.agent-content {
+  overflow-anchor: none;
+  scroll-behavior: auto;
+}
+.conversation-stack {
+  display: flow-root;
+}
+.message-arrival {
+  animation: message-arrive 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes message-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.follow-latest {
+  position: absolute;
+  bottom: 12px;
+  right: 20px;
+  z-index: 2;
+  padding: 7px 12px;
+  border: 1px solid color-mix(in srgb, var(--terminal-color) 35%, var(--line));
+  border-radius: 20px;
+  background: var(--bg);
+  color: var(--ink);
+  box-shadow: 0 3px 12px #0003;
+  font:
+    12px/1.4 "DM Sans",
+    sans-serif;
+  cursor: pointer;
+}
+.follow-latest:hover {
+  border-color: var(--terminal-color);
+}
+.follow-latest[hidden] {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .message-arrival {
+    animation: none;
+  }
+}
+
+/* A shared reading column, with outgoing turns unmistakably on the right. */
+.conversation-stack {
+  max-width: 76ch;
+  margin-inline: auto;
+}
+.conversation-message.user {
+  width: fit-content;
+  max-width: 88%;
+  margin-left: auto;
+  margin-right: 0;
+  padding: 13px 17px;
+  border-radius: 14px 14px 4px 14px;
+  background: color-mix(in srgb, var(--terminal-color) 24%, var(--bg));
+}
+.conversation-message.user .message-role {
+  color: var(--ink);
+  opacity: 0.75;
+}
+
+.composer-measure {
+  position: fixed;
+  top: 0;
+  left: -10000px;
+  visibility: hidden;
+  pointer-events: none;
+  box-sizing: border-box;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  contain: layout style paint;
+}
+.message-line-arrival {
+  animation: message-line-arrive 340ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: var(--arrival-delay, 0ms);
+}
+@keyframes message-line-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .message-line-arrival {
+    animation: none;
+  }
 }

@@ -1,3 +1,4 @@
+import { ConversationScroll } from "./conversation-scroll";
 import { busyPhrases } from "./busy-phrases";
 import { renderChatMarkdown } from "./chat-markdown";
 import { el, button } from "./dom";
@@ -26,6 +27,20 @@ export class AgentView {
   private label = el("span", "agent-status-label", "Ready");
   private detail = el("span", "agent-detail", "Shell · live output");
   private content = el("div", "agent-content");
+  private stack = el("div", "conversation-stack");
+  private latest = button(
+    "Follow latest messages",
+    () => this.scroller.latest(),
+    "follow-latest",
+    "Latest messages ↓",
+  );
+  private scroller: ConversationScroll;
+  private messageNodes = new Map<
+    string,
+    { element: HTMLElement; text: string; role: string }
+  >();
+  private messageKeys = new Map<string, string>();
+  private receivedActivity = false;
   private notice = button(
     "Open terminal to respond",
     () => this.openTerminal(),
@@ -55,8 +70,6 @@ export class AgentView {
   private connection = "Connecting";
   private signature = "";
   private statusText = "";
-  private scrollPosition = 0;
-  private followOutput = true;
   private name: string;
   constructor(
     name: string,
@@ -81,15 +94,14 @@ export class AgentView {
     this.heading.append(this.avatar, info);
     this.notice.hidden = true;
     this.content.tabIndex = 0;
-    this.content.addEventListener("scroll", () => this.captureScroll(), {
-      passive: true,
-    });
-    this.content.addEventListener(
-      "load",
-      () => {
-        if (this.followOutput) this.restoreScroll();
+    this.latest.hidden = true;
+    this.content.append(this.stack);
+    this.scroller = new ConversationScroll(
+      this.content,
+      this.stack,
+      (following) => {
+        this.latest.hidden = following;
       },
-      true,
     );
     this.content.setAttribute("aria-label", "Agent conversation and output");
     this.error.setAttribute("role", "alert");
@@ -98,26 +110,25 @@ export class AgentView {
       this.interruptButton,
       this.error,
       this.content,
+      this.latest,
     );
     this.setCreature(name);
   }
   captureScroll(): void {
-    if (!this.content.isConnected || !this.content.clientHeight) return;
-    this.scrollPosition = this.content.scrollTop;
-    this.followOutput =
-      this.content.scrollHeight -
-        this.content.scrollTop -
-        this.content.clientHeight <
-      60;
+    this.scroller.capture();
+  }
+  reflow(): void {
+    this.scroller.reflow();
   }
   restoreScroll(): void {
-    if (!this.content.isConnected || !this.content.clientHeight) return;
-    this.content.scrollTop = this.followOutput
-      ? this.content.scrollHeight
-      : this.scrollPosition;
+    this.scroller.restore();
+  }
+  dispose(): void {
+    this.setVisible(false);
+    this.scroller.dispose();
   }
   setVisible(visible: boolean): void {
-    if (visible) this.restoreScroll();
+    this.scroller.setVisible(visible);
     clearInterval(this.visibleTimer);
     this.visibleTimer = visible
       ? setInterval(() => {
@@ -141,12 +152,17 @@ export class AgentView {
       const index = this.pending.findIndex(
         (p) => p.state !== "failed" && p.text.trim() === message.text.trim(),
       );
-      if (index >= 0) this.pending.splice(index, 1);
+      if (index >= 0) {
+        this.messageKeys.set(message.id, this.pending[index].id);
+        this.pending.splice(index, 1);
+      }
     }
     if (this.seenUserMessages.size > 2000)
       this.seenUserMessages = new Set([...this.seenUserMessages].slice(-1000));
     this.activity = activity;
     this.render();
+    this.receivedActivity ||=
+      activity.canMessage || activity.messages.length > 0;
   }
   beginMessage(text: string): string {
     const id = crypto.randomUUID();
@@ -155,10 +171,8 @@ export class AgentView {
       (p) => p.state !== "failed" || p.text !== text,
     );
     this.pending.push({ id, text, state: "sending" });
-    this.followOutput = true;
     this.render();
-    this.followOutput = true;
-    this.restoreScroll();
+    this.scroller.latest();
     return id;
   }
   finishMessage(id: string, sent: boolean): void {
@@ -268,18 +282,15 @@ export class AgentView {
           ),
         );
       for (const message of a.messages) {
-        const item = el("article", `conversation-message ${message.role}`);
-        item.append(
-          el(
-            "span",
-            "message-role",
-            message.role === "user" ? "YOU" : "CLAUDE",
+        const key = this.messageKeys.get(message.id) || message.id;
+        nodes.push(
+          this.messageNode(
+            key,
+            message.role,
+            message.text,
+            this.receivedActivity,
           ),
         );
-        item.append(renderChatMarkdown(message.text));
-        const previews = imagePreviews(this.terminalId, message.text);
-        if (previews) item.append(previews);
-        nodes.push(item);
       }
     } else if (this.pending.length) {
       // The first outgoing turn is already useful content while the transcript loads.
@@ -372,15 +383,8 @@ export class AgentView {
       if (previews) nodes.push(previews);
     }
     for (const message of this.pending) {
-      const item = el(
-        "article",
-        `conversation-message user pending-message ${message.state}`,
-      );
-      item.dataset.messageId = message.id;
-      item.append(
-        el("span", "message-role", "YOU"),
-        renderChatMarkdown(message.text),
-      );
+      const item = this.messageNode(message.id, "user", message.text, true);
+      item.classList.add("pending-message", message.state);
       const status = el(
         "span",
         "message-delivery",
@@ -394,7 +398,70 @@ export class AgentView {
       item.append(status);
       nodes.push(item);
     }
-    this.content.replaceChildren(...nodes);
-    this.restoreScroll();
+    // Keep unchanged messages mounted: selection, images and arrival animations
+    // survive polling and acknowledgement of optimistic outgoing messages.
+    let cursor = this.stack.firstChild;
+    for (const node of nodes) {
+      if (node === cursor) cursor = cursor.nextSibling;
+      else this.stack.insertBefore(node, cursor);
+    }
+    while (cursor) {
+      const next = cursor.nextSibling;
+      cursor.remove();
+      cursor = next;
+    }
+    for (const [key, value] of this.messageNodes) {
+      if (value.element.parentElement !== this.stack)
+        this.messageNodes.delete(key);
+    }
+    const activeIds = new Set(a?.messages.map((message) => message.id));
+    for (const key of this.messageKeys.keys())
+      if (!activeIds.has(key)) this.messageKeys.delete(key);
+    if (!this.receivedActivity) this.scroller.restore();
+    else this.scroller.reflow();
+  }
+  private messageNode(
+    id: string,
+    role: string,
+    text: string,
+    animate: boolean,
+  ): HTMLElement {
+    let cached = this.messageNodes.get(id);
+    const arriving = !cached && animate;
+    if (!cached) {
+      const element = el("article", `conversation-message ${role}`);
+      element.dataset.messageId = id;
+      if (animate) element.classList.add("message-arrival");
+      cached = { element, text: "", role: "" };
+      this.messageNodes.set(id, cached);
+    }
+    const item = cached.element;
+    item.classList.remove("pending-message", "sending", "sent", "failed");
+    item.querySelector(".message-delivery")?.remove();
+    if (cached.text !== text || cached.role !== role) {
+      const body = renderChatMarkdown(text);
+      if (arriving) {
+        const selector = "p,h1,h2,h3,h4,h5,h6,li,pre,.message-table";
+        const lines = [...body.querySelectorAll<HTMLElement>(selector)].filter(
+          (line) => !line.querySelector(selector),
+        );
+        for (const [index, line] of lines.entries()) {
+          line.classList.add("message-line-arrival");
+          line.style.setProperty(
+            "--arrival-delay",
+            `${Math.min(index * 28, 196)}ms`,
+          );
+        }
+      }
+      item.replaceChildren(
+        el("span", "message-role", role === "user" ? "YOU" : "CLAUDE"),
+        body,
+      );
+      const previews = imagePreviews(this.terminalId, text);
+      if (previews) item.append(previews);
+      cached.text = text;
+      cached.role = role;
+    }
+    return item;
   }
 }

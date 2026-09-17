@@ -103,7 +103,20 @@ open while you select a second; drag between the two conversations to resize the
 Double-click either divider to balance it. Connections choose facing node edges
 and use dashed lines. Claude’s live process status drives working animations,
 separately from a task being ready for review. The creature and rotating activity
-caption sit immediately above the input.
+caption sit immediately above the input. Conversation messages follow smoothly
+while you are at the bottom. Scroll up to read history; **Latest messages** resumes
+following, and sending a message returns you to the latest turn. New messages
+arrive with gently staggered text, outgoing bubbles align right, and reduced-motion
+preferences disable those animations. Drafts grow only when their measured height
+changes; typing within a line does not resize or redraw the terminal.
+
+Creatures use the original numbered PNG poses at 800 ms per frame. To add or
+extend a creature, put consecutive `Name-1.png`, `Name-2.png`, etc. in
+`web/assets/sprites` (`Name_1.png` is also supported). Use matching transparent
+pixel-art canvases for each pose. The build discovers complete sequences and the
+picker automatically includes them; no per-creature animation code is needed.
+Working indicators and hover previews share this frame player. Idle and
+reduced-motion views show the first pose.
 
 
 Right-click a checkout to **Create child worktree…**, or right-click an agent to **Delegate task…**. Delegation starts Claude or Codex in an independent child checkout with task context. Use **Tasks and inbox** to read messages, reply, follow status, and review completed changes before explicitly integrating them into the parent. Existing agents can opt in using the panel's connection instructions. Messages are persistent and read when agents check their inbox; ordinary terminals and worktrees continue to work independently.

@@ -238,15 +238,6 @@
   font-size: 17px;
   color: var(--node-color);
 }
-.team-task-link {
-  padding: 9px 19px;
-  width: 100%;
-  background: #eae5ce08;
-  border-top: 1px solid #eae5ce12;
-  color: var(--ink);
-  text-align: left;
-  font-size: 11px;
-}
 .team-controls {
   position: absolute;
   display: flex;
@@ -599,22 +590,13 @@
 .team-node.is-working .team-node-state::before {
   animation: agent-busy-pulse 1.2s ease-in-out infinite;
 }
-.team-node.is-working .creature {
-  animation: agent-busy-hop 1s steps(2, end) infinite;
-}
 @keyframes agent-busy-pulse {
   50% {
     opacity: 0.35;
     transform: scale(0.75);
   }
 }
-@keyframes agent-busy-hop {
-  50% {
-    transform: translateY(-3px);
-  }
-}
 @media (prefers-reduced-motion: reduce) {
-  .team-node.is-working .creature,
   .team-node.is-working .team-node-state::before {
     animation: none;
   }

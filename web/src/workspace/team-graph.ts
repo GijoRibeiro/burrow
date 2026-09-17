@@ -571,15 +571,6 @@ export class TeamGraph {
         }
       });
     }
-    if (node.task?.status === "waiting" || node.task?.status === "done")
-      card.append(
-        button(
-          `Task details for ${title}`,
-          () => this.ctx.task(node.task!.id),
-          "team-task-link",
-          node.task.status === "done" ? "Review result →" : "Read question →",
-        ),
-      );
     return card;
   }
   private paintSelection(): void {
