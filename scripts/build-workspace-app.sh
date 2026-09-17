@@ -9,6 +9,9 @@ trap 'rm -rf "$stage"' EXIT
 bundle="$stage/Cloovies.app"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources/FontLicenses"
 cp web/public/font-licenses/*.txt "$bundle/Contents/Resources/FontLicenses/"
+mkdir -p "$bundle/Contents/Resources/ThirdPartyLicenses"
+cp web/node_modules/marked/LICENSE "$bundle/Contents/Resources/ThirdPartyLicenses/Marked.txt"
+cp web/node_modules/dompurify/LICENSE "$bundle/Contents/Resources/ThirdPartyLicenses/DOMPurify-Apache.txt"
 mkdir -p "$bundle/Contents/Resources/Setup"
 cp app/setup/install.command "$bundle/Contents/Resources/Setup/"
 iconutil -c icns build/macos/icon.iconset -o "$bundle/Contents/Resources/AppIcon.icns"
@@ -27,8 +30,8 @@ cat > "$bundle/Contents/Info.plist" <<'PLIST'
 <key>CFBundleName</key><string>Cloovies</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundleIdentifier</key><string>com.cloovies.workspace</string>
-<key>CFBundleVersion</key><string>10</string>
-<key>CFBundleShortVersionString</key><string>0.5.1</string>
+<key>CFBundleVersion</key><string>11</string>
+<key>CFBundleShortVersionString</key><string>0.5.2</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>NSHighResolutionCapable</key><true/>
 <key>LSMinimumSystemVersion</key><string>13.0</string>

@@ -87,7 +87,14 @@ Ask a **Head agent** to work on your Linear tickets and it starts one worker
 and terminal per ticket immediately. Discuss scope in its terminal whenever you need to. **Team canvas** shows
 heads branching into workers; click a creature to talk, or switch to **Terminals**
 to keep your familiar split layout. The head can read worker questions and send
-replies while supervising. Use **Active agents only** for a quieter sidebar.
+replies while supervising. **Active agents only** shows running Claude and Codex
+agents, their worktrees, and any parent worktrees needed for context. Empty
+worktrees, stopped agents, and shell-only projects are hidden until you switch
+the filter off. Filtering never stops or removes a terminal.
+
+Agent conversations render Markdown headings, lists, emphasis, tables, and code
+inside a comfortable reading column. Links and local image previews remain
+interactive, and text-size controls also resize the conversation.
 
 
 Right-click a checkout to **Create child worktree…**, or right-click an agent to **Delegate task…**. Delegation starts Claude or Codex in an independent child checkout with task context. Use **Tasks and inbox** to read messages, reply, follow status, and review completed changes before explicitly integrating them into the parent. Existing agents can opt in using the panel's connection instructions. Messages are persistent and read when agents check their inbox; ordinary terminals and worktrees continue to work independently.

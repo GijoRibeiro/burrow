@@ -1,4 +1,4 @@
-import { worktreeHierarchy } from "./hierarchy";
+import { activeWorktrees, worktreeHierarchy } from "./hierarchy";
 import { contextMenu } from "./context-menu";
 import { creature } from "./creature";
 import { badge, button, dialog, el } from "./dom";
@@ -36,23 +36,27 @@ export function renderProjectList(ctx: SidebarContext): void {
   const filter = ctx.search.value.toLowerCase();
   const visible = new Set(ids(ctx.tree));
   for (const p of ctx.state.projects) {
-    const terminals = ctx.state.terminals.filter((t) => t.projectId === p.id);
-    if (
-      ctx.onlyActive &&
-      !terminals.some(
-        (t) =>
-          t.status === "running" &&
-          (t.program === "claude" || t.program === "codex"),
-      )
-    )
-      continue;
+    const terminals = ctx.state.terminals.filter(
+      (t) =>
+        t.projectId === p.id &&
+        (!ctx.onlyActive ||
+          (t.status === "running" &&
+            (t.program === "claude" || t.program === "codex"))),
+    );
+    if (ctx.onlyActive && !terminals.length) continue;
+    const worktrees = ctx.onlyActive
+      ? activeWorktrees(
+          p.worktrees,
+          terminals.map((t) => t.path),
+        )
+      : p.worktrees;
     if (
       filter &&
       ![
         p.name,
         p.path,
         ...terminals.map((t) => t.name),
-        ...p.worktrees.map((w) => w.branch),
+        ...worktrees.map((w) => w.branch),
       ]
         .join(" ")
         .toLowerCase()
@@ -150,7 +154,7 @@ export function renderProjectList(ctx: SidebarContext): void {
         content.append(
           el("p", "project-error", "Folder unavailable. Check its location."),
         );
-      for (const { tree: w, depth } of worktreeHierarchy(p.worktrees)) {
+      for (const { tree: w, depth } of worktreeHierarchy(worktrees)) {
         const row = el(
           "div",
           `worktree-row${ctx.selectedPath === w.path ? " selected" : ""}`,

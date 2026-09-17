@@ -1859,7 +1859,9 @@ test("head starts a team immediately and coordinates workers on a persistent can
   await expect(page.locator(".terminal-pane.focused")).toHaveCount(1);
   // Sidebar filtering is visual only and survives reload.
   await page
-    .getByRole("button", { name: "Show only projects with running agents" })
+    .getByRole("button", {
+      name: "Show only running agents and their worktrees",
+    })
     .click();
   await expect(
     page.getByRole("button", { name: "Toggle Morning team", exact: true }),
@@ -2138,7 +2140,7 @@ test("message composers grow for multiline and wrapped drafts, then shrink after
 test("chat hyperlinks open separately and code stays literal", async ({
   page,
   context,
-}) => {
+}, info) => {
   const project = await (
     await page.request.post("/api/workspace/projects", {
       data: {
@@ -2174,11 +2176,36 @@ test("chat hyperlinks open separately and code stays literal", async ({
   await send(
     page,
     "Link reader",
-    "Open [preview](http://localhost:4999/demo?q=1&v=2) and https://example.com/docs.\n```sh\ncurl https://example.com/code\n```",
+    "Team update\n\n## Your team is working\n\n**Two tickets** are underway. Open [preview](http://localhost:4999/demo?q=1&v=2) and https://example.com/docs.\n\n### Mobile document view\n\n- Keep documents readable on smaller screens.\n- Review the layout before shipping.\n  - Check portrait and landscape.\n\n### Pricing clarity\n\n1. Explain the asset price clearly.\n2. Show the development fee separately.\n\nUse `git status` to check progress.\n\n```sh\ncurl https://example.com/code\n```",
   );
   const message = pane.locator(".conversation-message.assistant").last();
   await expect(message.getByRole("link")).toHaveCount(2);
   await expect(message.locator(".message-code a")).toHaveCount(0);
+  await expect(
+    message.getByRole("heading", { name: "Your team is working" }),
+  ).toBeVisible();
+  await expect(message.locator("strong")).toHaveText("Two tickets");
+  await expect(message.locator("ul ul li")).toHaveText(
+    "Check portrait and landscape.",
+  );
+  await expect(message.locator("ol > li")).toHaveCount(2);
+  await page
+    .getByRole("button", { name: "Open selected agent in terminals" })
+    .click();
+  await pane.getByRole("button", { name: "Focus pane", exact: true }).click();
+  await page.setViewportSize({ width: 1728, height: 1080 });
+  await message.evaluate((el) => el.scrollIntoView({ block: "start" }));
+  await expect
+    .poll(() =>
+      message.evaluate((el) => el.getBoundingClientRect().width < 900),
+    )
+    .toBe(true);
+  await page.screenshot({ path: info.outputPath("readable-chat.png") });
+  await page.setViewportSize({ width: 820, height: 900 });
+  await expect
+    .poll(() => message.evaluate((el) => el.scrollWidth <= el.clientWidth + 1))
+    .toBe(true);
+  await page.screenshot({ path: info.outputPath("readable-chat-narrow.png") });
   await context.route("http://localhost:4999/**", (route) =>
     route.fulfill({
       contentType: "text/html",
@@ -2711,11 +2738,9 @@ test("project setup offers Git and head picker initializes folders without hidin
     .getByRole("button", { name: "Start a head agent", exact: true })
     .first()
     .click();
-  const head = page
-    .getByRole("dialog")
-    .filter({
-      has: page.getByRole("heading", { name: "Meet your head agent" }),
-    });
+  const head = page.getByRole("dialog").filter({
+    has: page.getByRole("heading", { name: "Meet your head agent" }),
+  });
   const picker = head.getByLabel("Project / checkout", { exact: true });
   await expect(picker).toContainText("Head without Git · No Git");
   await expect(picker).toContainText("New Git folder / Main checkout");
@@ -2748,4 +2773,91 @@ test("project setup offers Git and head picker initializes folders without hidin
   expect(
     execFileSync("git", ["-C", plain, "ls-files"], { encoding: "utf8" }).trim(),
   ).toBe("");
+});
+
+test("active-agent sidebar hides empty worktrees and stopped agents while preserving ancestors", async ({
+  page,
+}, info) => {
+  const tree = (path: string, parentPath?: string) => ({
+    path,
+    parentPath,
+    name: path.slice(1),
+    branch: path.slice(1),
+    main: path === "/main",
+  });
+  const session = (
+    id: string,
+    path: string,
+    program: string,
+    status = "running",
+    projectId = "filtered",
+  ) => ({
+    id,
+    path,
+    program,
+    status,
+    projectId,
+    name: id,
+    createdAt: new Date().toISOString(),
+  });
+  const snapshot = {
+    version: 1,
+    tmuxAvailable: true,
+    projects: [
+      {
+        id: "filtered",
+        name: "Filter fixture",
+        path: "/main",
+        git: true,
+        worktrees: [
+          tree("/main"),
+          tree("/parent", "/main"),
+          tree("/worker", "/parent"),
+          tree("/unused"),
+          tree("/stopped"),
+        ],
+      },
+      {
+        id: "inactive",
+        name: "Inactive project",
+        path: "/inactive",
+        git: true,
+        worktrees: [tree("/inactive")],
+      },
+    ],
+    terminals: [
+      session("Running Claude", "/worker", "claude"),
+      session("Running Codex", "/worker/src", "codex"),
+      session("Stopped agent", "/stopped", "claude", "stopped"),
+      session("Shell", "/main", "shell"),
+      session("Inactive shell", "/inactive", "shell", "running", "inactive"),
+    ],
+  };
+  await page.route("**/api/workspace", (route) =>
+    route.fulfill({ json: snapshot }),
+  );
+  await page.goto("/");
+  const group = page.locator('[data-project-id="filtered"]');
+  await expect(group.locator(".worktree-row")).toHaveCount(5);
+  await page
+    .getByRole("button", {
+      name: "Show only running agents and their worktrees",
+    })
+    .click();
+  await expect(group.locator(".worktree-row")).toHaveCount(3);
+  await expect(group.locator(".session-row")).toHaveCount(2);
+  await expect(group.locator('[data-worktree-path="/parent"]')).toBeVisible();
+  await expect(group.locator('[data-worktree-path="/unused"]')).toHaveCount(0);
+  await expect(page.locator('[data-project-id="inactive"]')).toHaveCount(0);
+  await page.screenshot({ path: info.outputPath("active-worktrees.png") });
+  await page.reload();
+  await expect(group.locator(".worktree-row")).toHaveCount(3);
+  await page
+    .getByRole("button", {
+      name: "Show only running agents and their worktrees",
+    })
+    .click();
+  await expect(group.locator(".worktree-row")).toHaveCount(5);
+  await expect(group.locator(".session-row")).toHaveCount(4);
+  await expect(page.locator('[data-project-id="inactive"]')).toBeVisible();
 });
