@@ -57,6 +57,8 @@ export class TerminalPane {
   private restartButton: HTMLButtonElement;
   private message = el("textarea", "message-input");
   private composerMeasureKey = "";
+  private composerMeasure = el("div", "composer-measure");
+  private lastSentSize = "";
   private send: HTMLButtonElement;
   private currentStatus = "";
   private activity?: Activity;
@@ -104,9 +106,9 @@ export class TerminalPane {
     this.message.value = draft;
     this.message.addEventListener("input", () => {
       this.saveDraft(this.message.value);
-      this.resizeComposer();
-      this.fit();
+      if (this.resizeComposer()) this.fit();
     });
+    document.body.append(this.composerMeasure);
     this.element.dataset.terminalId = session.id;
     const header = el("header", "pane-header");
     header.draggable = true;
@@ -338,6 +340,10 @@ export class TerminalPane {
     const previous = this.currentStatus;
     this.session = session;
     this.currentStatus = session.status;
+    this.element.classList.toggle(
+      "is-working",
+      session.liveStatus === "working",
+    );
     this.name.textContent = session.name;
     this.element.setAttribute("aria-label", `${session.name} terminal`);
     this.refreshComposer();
@@ -460,6 +466,7 @@ export class TerminalPane {
         ws.close();
         return;
       }
+      this.lastSentSize = "";
       this.terminal.reset();
       this.status(this.session.status === "exited" ? "Exited" : "Live");
       this.refreshComposer();
@@ -586,8 +593,9 @@ export class TerminalPane {
     this.setView(this.session.program === "codex" ? "terminal" : "agent");
     this.message.focus();
   }
-  private resizeComposer(): void {
-    if (!this.message.clientWidth) return;
+  private resizeComposer(): boolean {
+    if (!this.message.clientWidth) return false;
+    let changed = false;
     const style = getComputedStyle(this.message);
     const key = JSON.stringify([
       this.message.value,
@@ -598,16 +606,43 @@ export class TerminalPane {
     ]);
     if (key !== this.composerMeasureKey) {
       this.composerMeasureKey = key;
-      this.message.style.height = "0px";
-      this.message.style.height = `${Math.max(30, this.message.scrollHeight)}px`;
+      // Measure away from the live layout: collapsing the textarea to zero on
+      // every keystroke shifts the viewport and makes terminal TUIs repaint.
+      for (const property of [
+        "font-family",
+        "font-size",
+        "font-weight",
+        "font-style",
+        "line-height",
+        "letter-spacing",
+        "word-spacing",
+        "padding-top",
+        "padding-bottom",
+        "padding-left",
+        "padding-right",
+      ]) {
+        this.composerMeasure.style.setProperty(
+          property,
+          style.getPropertyValue(property),
+        );
+      }
+      this.composerMeasure.style.width = `${this.message.clientWidth}px`;
+      this.composerMeasure.textContent = this.message.value + "\u200b";
+      const height = `${Math.max(30, Math.ceil(this.composerMeasure.getBoundingClientRect().height))}px`;
+      if (this.message.style.height !== height) {
+        this.message.style.height = height;
+        changed = true;
+      }
       this.message.scrollTop = 0;
     }
     // Long drafts scroll with the pane rather than inside a tiny input box.
-    this.element.classList.toggle(
-      "has-long-draft",
-      this.message.offsetHeight + 180 > this.element.clientHeight,
-    );
+    const long = this.message.offsetHeight + 180 > this.element.clientHeight;
+    if (this.element.classList.contains("has-long-draft") !== long) {
+      this.element.classList.toggle("has-long-draft", long);
+      changed = true;
+    }
     if (!this.message.value) this.element.scrollTop = 0;
+    return changed;
   }
   fit(): void {
     cancelAnimationFrame(this.frame);
@@ -621,12 +656,23 @@ export class TerminalPane {
         return;
       this.resizeComposer();
       this.restoringTerminalScroll = true;
-      this.fitAddon.fit();
+      const dimensions = this.fitAddon.proposeDimensions();
+      if (
+        dimensions &&
+        (dimensions.cols !== this.terminal.cols ||
+          dimensions.rows !== this.terminal.rows)
+      )
+        this.fitAddon.fit();
       if (this.terminalScroll.follow) this.terminal.scrollToBottom();
       else this.terminal.scrollToLine(this.terminalScroll.top);
       this.restoringTerminalScroll = false;
-      this.agent.restoreScroll();
-      if (this.socket?.readyState === WebSocket.OPEN)
+      this.agent.reflow();
+      const size = `${this.terminal.cols}x${this.terminal.rows}`;
+      if (
+        this.socket?.readyState === WebSocket.OPEN &&
+        size !== this.lastSentSize
+      ) {
+        this.lastSentSize = size;
         this.socket.send(
           JSON.stringify({
             type: "resize",
@@ -634,6 +680,7 @@ export class TerminalPane {
             rows: this.terminal.rows,
           }),
         );
+      }
     });
   }
   setFontSize(size: number): void {
@@ -652,7 +699,8 @@ export class TerminalPane {
   dispose(): void {
     this.disposed = true;
     this.hostedApps.dispose();
-    this.agent.setVisible(false);
+    this.composerMeasure.remove();
+    this.agent.dispose();
     clearTimeout(this.timer);
     clearTimeout(this.activityTimer);
     clearTimeout(this.screenTimer);

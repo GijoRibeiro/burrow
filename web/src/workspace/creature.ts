@@ -1,16 +1,51 @@
 import { AGENT_COLORS, agentColor } from "../ui/colors";
 import { button, el } from "./dom";
 
-const sprites = import.meta.glob<string>("../../assets/sprites/*-*.png", {
+const sprites = import.meta.glob<string>("../../assets/sprites/*.png", {
   eager: true,
   query: "?url",
   import: "default",
 });
+// Bitwise holds each original pixel-art pose for 800ms. Discover numbered
+// frames at build time, so adding a third pose needs no animation-code change.
+export const SPRITE_FRAME_MS = 800;
+export function spriteCatalog(
+  files: Record<string, string>,
+): Map<string, string[]> {
+  const groups = new Map<string, Map<number, string>>();
+  for (const [path, url] of Object.entries(files)) {
+    const match = path.match(/\/([^/]+)[-_]([1-9]\d*)\.png$/);
+    if (!match) continue;
+    const [, name, frame] = match;
+    if (!groups.has(name)) groups.set(name, new Map());
+    groups.get(name)!.set(Number(frame), url);
+  }
+  const catalog = new Map<string, string[]>();
+  for (const [name, frames] of groups) {
+    const sorted = [...frames].sort(([a], [b]) => a - b);
+    if (sorted.every(([frame], index) => frame === index + 1))
+      catalog.set(
+        name,
+        sorted.map(([, url]) => url),
+      );
+  }
+  return catalog;
+}
+const catalog = spriteCatalog(sprites);
+const sequences = new Set<number>();
+function prepareSequence(count: number) {
+  if (count < 2 || sequences.has(count)) return;
+  sequences.add(count);
+  const style = document.createElement("style");
+  style.dataset.spriteSequence = String(count);
+  style.textContent = `@keyframes creature-poses-${count} { 0% { opacity: 1; } ${100 / count}% { opacity: 0; } 100% { opacity: 0; } }`;
+  document.head.append(style);
+}
 export const terminalColor = (id: string): string =>
   agentColor(`terminal:${id}`);
 export const validColor = (value: unknown): value is string =>
   typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value);
-export const creatures = [
+const preferredCreatures = [
   "Grook",
   "ghost",
   "Gijo",
@@ -24,6 +59,12 @@ export const creatures = [
   "blob",
   "mouse",
 ];
+export const creatures = [
+  ...preferredCreatures.filter((name) => catalog.has(name)),
+  ...[...catalog.keys()]
+    .filter((name) => !preferredCreatures.includes(name))
+    .sort(),
+];
 export function defaultCreature(id: string): string {
   let hash = 0;
   for (const c of id) hash = (hash * 31 + c.charCodeAt(0)) >>> 0;
@@ -32,14 +73,26 @@ export function defaultCreature(id: string): string {
 export function creature(name: string, className = ""): HTMLElement {
   const node = el("span", `creature ${className}`);
   node.setAttribute("aria-hidden", "true");
-  node.dataset.creature = name;
-  for (const frame of [1, 2]) {
-    const img = el("span", `creature-frame frame-${frame}`);
-    const mask = `url("${sprites[`../../assets/sprites/${name}-${frame}.png`]}" )`;
+  const chosen = catalog.has(name) ? name : "Grook";
+  const frames = catalog.get(chosen)!;
+  prepareSequence(frames.length);
+  node.dataset.creature = chosen;
+  node.dataset.frameCount = String(frames.length);
+  node.style.setProperty(
+    "--sprite-sequence",
+    `creature-poses-${frames.length}`,
+  );
+  const duration = frames.length * SPRITE_FRAME_MS;
+  node.style.setProperty("--sprite-duration", `${duration}ms`);
+  const phase = Date.now() % duration;
+  frames.forEach((url, index) => {
+    const img = el("span", `creature-frame frame-${index + 1}`);
+    const mask = `url("${url}")`;
     img.style.maskImage = mask;
     img.style.setProperty("-webkit-mask-image", mask);
+    img.style.animationDelay = `-${(phase + duration - index * SPRITE_FRAME_MS) % duration}ms`;
     node.append(img);
-  }
+  });
   return node;
 }
 export function chooseCreature(

@@ -319,7 +319,10 @@ function sessionRow(
     "",
   );
   toggle.append(
-    creature(ctx.creatureName(t.id), `session-creature ${t.status}`),
+    creature(
+      ctx.creatureName(t.id),
+      `session-creature ${t.status}${t.liveStatus === "working" ? " working" : ""}`,
+    ),
     el("span", "session-label", t.name),
     el(
       "span",

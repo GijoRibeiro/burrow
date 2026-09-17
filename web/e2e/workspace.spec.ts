@@ -1011,7 +1011,17 @@ test("Codex launcher, YOLO restart, distinct identities and duplicate migration"
     };
   });
   expect(identities.colors).toBe(identities.count);
-  expect(identities.creatures).toBe(Math.min(12, identities.count));
+  await pane
+    .getByRole("button", { name: "Customize terminal", exact: true })
+    .click();
+  const availableCreatures = await page.locator(".creature-choice").count();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Done", exact: true })
+    .click();
+  expect(identities.creatures).toBe(
+    Math.min(availableCreatures, identities.count),
+  );
   // Simulate the older inherited red/creature assignments, then migrate them.
   await page.addInitScript(() => {
     if (sessionStorage.getItem("appearance-migration-fixture")) return;
@@ -3049,6 +3059,11 @@ test("canvas keeps conversations warm, sends immediately, pins two agents and re
   const card = page.locator(`[data-node-id="${worker.id}"]`);
   await expect(card).toHaveClass(/is-working/);
   await expect(card).toContainText("Working now");
+  await expect(card.locator(".creature-frame").first()).toHaveCSS(
+    "animation-name",
+    "creature-poses-2",
+  );
+  await expect(page.locator(".team-task-link")).toHaveCount(0);
   await expect(page.locator(".team-wires path")).toHaveCSS(
     "stroke-dasharray",
     /\d/,
@@ -3290,5 +3305,298 @@ test("running app ports belong to their checkout and open from both terminal vie
       data: { action: "stop" },
     });
     await request.delete(`/api/workspace/projects/${project.id}`);
+  }
+});
+
+test("chat follows arrivals and reflow, pauses for history and resumes on send", async ({
+  page,
+  request,
+}, info) => {
+  const project = await (
+    await request.post("/api/workspace/projects", {
+      data: {
+        path: join(process.env.CLOOVIES_E2E_ROOT!, "Cloovies"),
+        name: "Cloovies",
+      },
+    })
+  ).json();
+  const terminal = await (
+    await request.post("/api/workspace/terminals", {
+      data: {
+        projectId: project.id,
+        path: project.path,
+        name: "Following fixture",
+        program: "claude",
+      },
+    })
+  ).json();
+  const activity = {
+    kind: "claude",
+    status: "ready",
+    canMessage: true,
+    tools: 0,
+    truncated: false,
+    messages: Array.from({ length: 20 }, (_, i) => ({
+      id: `history-${i}`,
+      role: "assistant",
+      text: `History ${i}\n\n${"A readable conversation with enough room to test scrolling. ".repeat(8)}`,
+    })),
+  };
+  await page.route(`**/terminals/${terminal.id}/activity`, (route) =>
+    route.fulfill({ json: activity }),
+  );
+  await page.route(`**/terminals/${terminal.id}/message`, (route) =>
+    route.fulfill({ json: {} }),
+  );
+  try {
+    await page.goto("/");
+    await page
+      .getByRole("button", { name: "Show Following fixture", exact: true })
+      .click();
+    const pane = page.getByRole("region", {
+      name: "Following fixture terminal",
+      exact: true,
+    });
+    await pane.getByRole("button", { name: "Agent view", exact: true }).click();
+    const content = pane.locator(".agent-content");
+    const gap = () =>
+      content.evaluate(
+        (el) => el.scrollHeight - el.scrollTop - el.clientHeight,
+      );
+    await expect(content).toContainText("History 19");
+    await expect.poll(gap).toBeLessThan(2);
+    await content
+      .locator("article")
+      .first()
+      .evaluate((el) => ((window as any).__originalMessage = el));
+    activity.messages.push({
+      id: "reply-one",
+      role: "assistant",
+      text: "A fresh reply\n\n" + "Streaming content. ".repeat(160),
+    });
+    await expect(content).toContainText("A fresh reply");
+    await expect.poll(gap).toBeLessThan(2);
+    expect(
+      await content
+        .locator("article")
+        .first()
+        .evaluate((el) => el === (window as any).__originalMessage),
+    ).toBe(true);
+    await expect(
+      content.locator('article[data-message-id="reply-one"]'),
+    ).toHaveCSS("animation-name", "message-arrive");
+    // Delayed layout growth used to turn following off before the next message.
+    await content
+      .locator("article")
+      .last()
+      .evaluate((el) => {
+        el.style.minHeight = "1800px";
+      });
+    await expect.poll(gap).toBeLessThan(2);
+    await page.setViewportSize({ width: 1100, height: 760 });
+    await expect.poll(gap).toBeLessThan(2);
+    activity.messages.push({
+      id: "reply-two",
+      role: "assistant",
+      text: "Still following after resizing",
+    });
+    await expect(content).toContainText("Still following after resizing");
+    await expect.poll(gap).toBeLessThan(2);
+    await content.hover();
+    await page.mouse.wheel(0, -650);
+    const latest = pane.getByRole("button", {
+      name: "Follow latest messages",
+      exact: true,
+    });
+    await expect(latest).toBeVisible();
+    // Let native wheel scrolling settle before recording the history position.
+    await expect.poll(gap).toBeGreaterThan(300);
+    const top = await content.evaluate((el) => el.scrollTop);
+    activity.messages.push({
+      id: "reply-three",
+      role: "assistant",
+      text: "Keep my reading position",
+    });
+    await expect(content).toContainText("Keep my reading position");
+    await expect
+      .poll(() => content.evaluate((el) => el.scrollTop))
+      .toBeCloseTo(top, 0);
+    await latest.click();
+    await expect.poll(gap).toBeLessThan(2);
+    await content.hover();
+    await page.mouse.wheel(0, -600);
+    await expect(latest).toBeVisible();
+    const input = pane.getByRole("textbox", {
+      name: "Message to Following fixture",
+      exact: true,
+    });
+    await input.fill("My own message should arrive gracefully");
+    await input.press("Enter");
+    await expect(content.locator(".pending-message")).toContainText(
+      "My own message",
+    );
+    await expect(content.locator(".pending-message")).toHaveCSS(
+      "animation-name",
+      "message-arrive",
+    );
+    await expect.poll(gap).toBeLessThan(2);
+    await expect(latest).toBeHidden();
+    const bubble = content.locator(".pending-message");
+    const column = await content.locator(".conversation-stack").boundingBox();
+    const bubbleBox = await bubble.boundingBox();
+    expect(bubbleBox!.x - column!.x).toBeGreaterThan(20);
+    expect(
+      Math.abs(bubbleBox!.x + bubbleBox!.width - column!.x - column!.width),
+    ).toBeLessThan(2);
+    activity.status = "working";
+    const avatar = pane.locator(".composer-activity .creature");
+    await expect(pane.locator(".composer-activity")).toHaveClass(/is-thinking/);
+    const poses = await avatar.evaluate((el) => {
+      const frames = [...el.querySelectorAll<HTMLElement>(".creature-frame")];
+      const sample = (time: number) => {
+        for (const frame of frames)
+          for (const animation of frame.getAnimations()) {
+            animation.pause();
+            animation.currentTime = time;
+          }
+        return frames.map((frame) => Number(getComputedStyle(frame).opacity));
+      };
+      return [sample(100), sample(900)];
+    });
+    expect(poses[0].filter((value) => value === 1)).toHaveLength(1);
+    expect(poses[1].filter((value) => value === 1)).toHaveLength(1);
+    expect(poses[0]).not.toEqual(poses[1]);
+    await expect(avatar).toHaveCSS("transform", "none");
+    activity.status = "ready";
+    await expect(pane.locator(".composer-activity")).not.toHaveClass(
+      /is-thinking/,
+    );
+    await expect(avatar.locator(".creature-frame").first()).toHaveCSS(
+      "opacity",
+      "1",
+    );
+    await expect(avatar.locator(".creature-frame").last()).toHaveCSS(
+      "opacity",
+      "0",
+    );
+    activity.status = "working";
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await expect(avatar.locator(".creature-frame").first()).toHaveCSS(
+      "animation-name",
+      "none",
+    );
+    activity.messages.push({
+      id: "reduced",
+      role: "assistant",
+      text: "Following without animation",
+    });
+    await expect(content).toContainText("Following without animation");
+    await expect.poll(gap).toBeLessThan(2);
+    await expect(
+      content.locator('article[data-message-id="reduced"]'),
+    ).toHaveCSS("animation-name", "none");
+    await page.screenshot({
+      path: info.outputPath("following-conversation.png"),
+    });
+  } finally {
+    await request.patch(`/api/workspace/terminals/${terminal.id}`, {
+      data: { action: "stop" },
+    });
+  }
+});
+
+test("typing a single-line draft never collapses the input or resizes the terminal", async ({
+  page,
+  request,
+}) => {
+  const resizes: { cols: number; rows: number }[] = [];
+  page.on("websocket", (socket) =>
+    socket.on("framesent", (event) => {
+      try {
+        const value = JSON.parse(String(event.payload));
+        if (value.type === "resize") resizes.push(value);
+      } catch {}
+    }),
+  );
+  const project = await (
+    await request.post("/api/workspace/projects", {
+      data: {
+        path: join(process.env.CLOOVIES_E2E_ROOT!, "Newbit"),
+        name: "Newbit",
+      },
+    })
+  ).json();
+  const terminal = await (
+    await request.post("/api/workspace/terminals", {
+      data: {
+        projectId: project.id,
+        path: project.path,
+        name: "Stable typing fixture",
+        program: "shell",
+      },
+    })
+  ).json();
+  try {
+    await page.goto("/");
+    await page
+      .getByRole("button", { name: "Show Stable typing fixture", exact: true })
+      .click();
+    const pane = page.getByRole("region", {
+      name: "Stable typing fixture terminal",
+      exact: true,
+    });
+    await pane
+      .getByRole("button", { name: "Terminal view", exact: true })
+      .click();
+    await expect(pane.locator(".connection-state")).toHaveText("Live");
+    await page.evaluate(() => document.fonts.ready);
+    await expect.poll(() => resizes.length).toBeGreaterThan(0);
+    const input = pane.locator(".message-input");
+    await input.fill("a");
+    await input.evaluate(async (el) => {
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      );
+      (window as any).__composerMutations = [];
+      new MutationObserver((records) =>
+        (window as any).__composerMutations.push(
+          ...records.map((record) => record.oldValue),
+        ),
+      ).observe(el, {
+        attributes: true,
+        attributeFilter: ["style"],
+        attributeOldValue: true,
+      });
+    });
+    const before = resizes.length;
+    const height = await input.evaluate((el) => el.clientHeight);
+    await input.pressSequentially(" calm draft with stable typing", {
+      delay: 25,
+    });
+    expect(resizes.length).toBe(before);
+    expect(await input.evaluate((el) => el.clientHeight)).toBe(height);
+    expect(
+      await page.evaluate(() => (window as any).__composerMutations),
+    ).toEqual([]);
+    await input.fill("First line\nSecond line\nThird line\nFourth line");
+    await expect
+      .poll(() => input.evaluate((el) => el.clientHeight))
+      .toBeGreaterThan(height * 2);
+    await expect.poll(() => resizes.length).toBeGreaterThan(before);
+    await expect
+      .poll(() => input.evaluate((el) => el.scrollHeight - el.clientHeight))
+      .toBeLessThanOrEqual(1);
+    const count = resizes.length;
+    await input.pressSequentially(" still the same line", { delay: 25 });
+    expect(resizes.length).toBe(count);
+    expect(
+      (await page.evaluate(
+        () => (window as any).__composerMutations,
+      )) as string[],
+    ).not.toContain("height: 0px;");
+  } finally {
+    await request.patch(`/api/workspace/terminals/${terminal.id}`, {
+      data: { action: "stop" },
+    });
   }
 });

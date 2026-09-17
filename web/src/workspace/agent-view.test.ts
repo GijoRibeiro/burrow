@@ -166,3 +166,54 @@ it("varies busy captions near the composer and stops when idle", () => {
   view.setVisible(false);
   expect(vi.getTimerCount()).toBe(0);
 });
+
+it("keeps existing message DOM and reconciles outgoing arrivals without replaying them", () => {
+  const view = new AgentView(
+    "Grook",
+    "stable",
+    () => {},
+    async () => {},
+    () => {},
+  );
+  const a: Activity = {
+    kind: "claude",
+    status: "ready",
+    canMessage: true,
+    tools: 0,
+    truncated: false,
+    messages: [{ id: "old", role: "assistant", text: "Existing history" }],
+  };
+  view.setActivity(a);
+  const original = view.element.querySelector("article")!;
+  expect(original.classList.contains("message-arrival")).toBe(false);
+  const id = view.beginMessage("New question");
+  const pending = view.element.querySelector(".pending-message")!;
+  expect(pending.classList.contains("message-arrival")).toBe(true);
+  view.finishMessage(id, true);
+  expect(view.element.querySelector(".pending-message")).toBe(pending);
+  view.setActivity({
+    ...a,
+    messages: [
+      ...a.messages,
+      { id: "confirmed", role: "user", text: "New question" },
+      {
+        id: "reply",
+        role: "assistant",
+        text: "New answer\n\nSecond paragraph",
+      },
+    ],
+  });
+  const articles = [...view.element.querySelectorAll("article")];
+  expect(articles[0]).toBe(original);
+  expect(articles[1]).toBe(pending);
+  expect(articles[1].querySelector(".message-delivery")).toBeNull();
+  expect(articles[2].classList.contains("message-arrival")).toBe(true);
+  const lines = articles[2].querySelectorAll<HTMLElement>(
+    ".message-line-arrival",
+  );
+  expect(lines).toHaveLength(2);
+  expect(
+    [...lines].map((line) => line.style.getPropertyValue("--arrival-delay")),
+  ).toEqual(["0ms", "28ms"]);
+  view.dispose();
+});
