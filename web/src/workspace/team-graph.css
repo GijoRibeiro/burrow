@@ -145,9 +145,24 @@
 }
 .team-node.selected {
   border-color: var(--node-color);
+  outline: 2px solid var(--node-color);
+  outline-offset: 3px;
+  background: color-mix(in srgb, var(--node-color) 12%, #31323c);
   box-shadow:
     0 0 0 3px color-mix(in srgb, var(--node-color) 13%, transparent),
     0 12px 26px #0003;
+}
+.team-node-selection {
+  display: none;
+  color: var(--node-color);
+  font-size: 10px;
+  font-weight: 600;
+}
+.team-node.selected .team-node-selection {
+  display: inline;
+}
+.team-node.selected .team-node-arrow {
+  display: none;
 }
 .team-node:hover {
   border-color: var(--node-color);

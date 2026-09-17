@@ -546,7 +546,7 @@ class WorkspaceApp {
     this.canvas.classList.toggle("team-mode", this.view === "team");
     for (const b of this.viewSwitch.querySelectorAll("button"))
       b.setAttribute("aria-pressed", String(b.dataset.view === this.view));
-    this.teamGraph.update(this.teamSelected);
+    this.teamGraph.update(this.focusedTeamAgent());
     if (!visible.has(this.zoomed || "")) this.zoomed = null;
     // Status updates must not detach focused inputs or interrupt typing.
     // Divider changes already update the DOM, so ratios do not affect this key.
@@ -618,7 +618,7 @@ class WorkspaceApp {
               this.appearances[t.id] = value;
               this.persist();
               this.renderSidebar();
-              this.teamGraph.update(this.teamSelected);
+              this.teamGraph.update(this.focusedTeamAgent());
             },
             draft: (value) => {
               if (value) this.drafts[t.id] = value;
@@ -808,12 +808,18 @@ class WorkspaceApp {
     this.persist();
   }
   private paintFocus(): void {
+    if (this.view === "team") this.teamGraph.update(this.focusedTeamAgent());
     for (const row of this.projects.querySelectorAll<HTMLElement>(
       ".session-row",
     ))
       row.classList.toggle("active", row.dataset.sessionId === this.active);
     for (const [id, pane] of this.panes)
       pane.element.classList.toggle("focused", id === this.active);
+  }
+  private focusedTeamAgent(): string {
+    return this.active === this.teamPinned
+      ? this.teamPinned
+      : this.teamSelected;
   }
   private zoom(id: string): void {
     if (this.view === "team") {
