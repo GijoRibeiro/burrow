@@ -3037,6 +3037,26 @@ test("canvas keeps conversations warm, sends immediately, pins two agents and re
     .getByRole("button", { name: "Open Warm head on canvas", exact: true })
     .click();
   await expect(page.locator(".team-dock-card")).toHaveCount(2);
+  const headCard = page.locator(`[data-node-id="${head.id}"]`);
+  const workerCard = page.locator(`[data-node-id="${worker.id}"]`);
+  await expect(headCard).toHaveClass(/selected/);
+  await expect(headCard.locator(".team-node-open")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(headCard.locator(".team-node-selection")).toBeVisible();
+  await expect(workerCard).not.toHaveClass(/selected/);
+  await page
+    .getByRole("textbox", { name: "Message to Warm worker", exact: true })
+    .click();
+  await expect(workerCard).toHaveClass(/selected/);
+  await expect(headCard).not.toHaveClass(/selected/);
+  await expect(headCard.locator(".team-node-open")).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+  await expect(workerCard).toHaveCSS("outline-style", "solid");
+  await expect(workerCard).toHaveCSS("outline-width", "2px");
   const dock = page.locator(".team-dock"),
     handle = page.getByRole("separator", {
       name: "Resize canvas terminal panel",
@@ -3067,6 +3087,9 @@ test("canvas keeps conversations warm, sends immediately, pins two agents and re
   workerStatus = "waiting";
   await expect(card).toHaveClass(/needs-reply/);
   await expect(card).toContainText("Needs your reply");
+  await expect(card).toHaveClass(/selected/);
+  await expect(card.locator(".team-node-selection")).toBeVisible();
+  await expect(card).toHaveCSS("outline-width", "2px");
   const attention = await card.evaluate((el) => {
     const style = getComputedStyle(el, "::after");
     return {
@@ -3098,7 +3121,7 @@ test("canvas keeps conversations warm, sends immediately, pins two agents and re
   expect(
     await pane.evaluate((el) =>
       el
-        .querySelector(".composer")!
+        .querySelector(".composer-images")!
         .previousElementSibling!.classList.contains("composer-activity"),
     ),
   ).toBe(true);

@@ -568,6 +568,7 @@ export class TeamGraph {
     const foot = el("div", `team-node-footer ${node.task?.status || ""}`);
     foot.append(
       el("span", "team-node-state", status),
+      el("span", "team-node-selection", "✓ Selected"),
       el("span", "team-node-arrow", "↗"),
     );
     open.append(foot);
