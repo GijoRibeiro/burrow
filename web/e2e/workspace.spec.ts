@@ -3982,3 +3982,127 @@ test("chat image paste previews, retries and delivers readable files", async ({
     path: info.outputPath("pasted-image-delivered.png"),
   });
 });
+
+test("chat retains complete public history across large tool results and new replies", async ({
+  page,
+  request,
+}, info) => {
+  const { readFileSync, readdirSync } = await import("node:fs");
+  const root = process.env.CLOOVIES_E2E_ROOT!;
+  const folder = join(root, "HistoryTranscript");
+  mkdirSync(folder, { recursive: true });
+  const project = await (
+    await request.post("/api/workspace/projects", {
+      data: { path: folder, name: "History QA" },
+    })
+  ).json();
+  const terminal = await (
+    await request.post("/api/workspace/terminals", {
+      data: {
+        projectId: project.id,
+        program: "claude",
+        name: "Complete history",
+      },
+    })
+  ).json();
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: "Show Complete history", exact: true })
+    .click();
+  const pane = page.getByRole("region", {
+    name: "Complete history terminal",
+    exact: true,
+  });
+  await expect(
+    pane.getByRole("button", { name: "Send message", exact: true }),
+  ).toBeEnabled();
+  const meta = readdirSync(join(root, "claude/sessions"))
+    .map((name) =>
+      JSON.parse(readFileSync(join(root, "claude/sessions", name), "utf8")),
+    )
+    .find((s) => s.cwd === project.path);
+  const transcript = join(
+    root,
+    "claude/projects/fixture",
+    `${meta.sessionId}.jsonl`,
+  );
+  const record = (id: string, text: string) =>
+    JSON.stringify({
+      type: "assistant",
+      uuid: id,
+      message: { content: text, stop_reason: "end_turn" },
+    }) + "\n";
+  const history = Array.from({ length: 150 }, (_, i) =>
+    record(
+      `history-${i}`,
+      `Public update ${i}: this conversation belongs in the chat.`,
+    ),
+  ).join("");
+  const tool =
+    JSON.stringify({
+      type: "user",
+      message: {
+        content: [
+          {
+            type: "tool_result",
+            content: "Hidden tool output " + "x".repeat(5 * 1024 * 1024),
+          },
+        ],
+      },
+    }) + "\n";
+  appendFileSync(
+    transcript,
+    history +
+      tool +
+      record("latest", "The latest reply after a large tool result."),
+  );
+  await expect(pane.locator(".conversation-message.assistant")).toHaveCount(
+    151,
+  );
+  await expect(pane.locator(".agent-content")).toContainText(
+    "Public update 0:",
+  );
+  await expect(pane.locator(".agent-content")).not.toContainText(
+    "Hidden tool output",
+  );
+  await expect(pane.locator(".history-note")).toHaveCount(0);
+  // A cold reopen must recover the same history, not just messages seen while open.
+  await page.reload();
+  await expect(pane.locator(".conversation-message.assistant")).toHaveCount(
+    151,
+  );
+  appendFileSync(
+    transcript,
+    record("new-live", "A new live reply remains visible too."),
+  );
+  await expect(pane.locator(".conversation-message.assistant")).toHaveCount(
+    152,
+  );
+  await expect(pane.locator(".agent-content")).toContainText(
+    "A new live reply remains visible too.",
+  );
+  const conversation = pane.locator(".agent-content");
+  await expect
+    .poll(() =>
+      conversation.evaluate(
+        (el) => el.scrollHeight - el.scrollTop - el.clientHeight,
+      ),
+    )
+    .toBeLessThan(3);
+  await conversation.evaluate((el) => {
+    el.scrollTop = 0;
+    el.dispatchEvent(new Event("scroll"));
+  });
+  await expect(
+    pane.getByText("Public update 0: this conversation belongs in the chat.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: info.outputPath("recovered-chat-history.png"),
+  });
+  const response = await (
+    await request.get(`/api/workspace/terminals/${terminal.id}/activity`)
+  ).json();
+  expect(response.messages).toHaveLength(152);
+});

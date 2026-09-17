@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -129,16 +128,15 @@ func (m *Manager) Activity(id string) (Activity, error) {
 	a.CanMessage = foreground
 	a.paneID = fields[2]
 	path := transcriptPath(config, session.Cwd, session.SessionID)
-	data, truncated, err := conversationTail(path)
+	conversation, err := m.readConversation(t.ID, path)
 	if err != nil {
 		a.Status = "unavailable"
 		applySessionStatus(&a, session.Status)
 		return a, nil
 	}
-	a = parseConversation(data)
+	a = conversation
 	a.CanMessage = foreground
 	a.paneID = fields[2]
-	a.Truncated = a.Truncated || truncated
 	applySessionStatus(&a, session.Status)
 	return a, nil
 }
@@ -193,127 +191,102 @@ func transcriptPath(config, cwd, session string) string {
 	}
 	return path
 }
-func conversationTail(path string) ([]byte, bool, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, false, err
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil {
-		return nil, false, err
-	}
-	const limit int64 = 4 << 20
-	truncated := info.Size() > limit
-	if truncated {
-		if _, err = f.Seek(-limit, io.SeekEnd); err != nil {
-			return nil, false, err
-		}
-	}
-	data, err := io.ReadAll(io.LimitReader(f, limit))
-	if truncated {
-		if i := bytes.IndexByte(data, '\n'); i >= 0 {
-			data = data[i+1:]
-		} else {
-			data = nil
-		}
-	}
-	// The writer may be in the middle of a record. Wait for its newline.
-	if i := bytes.LastIndexByte(data, '\n'); i >= 0 {
-		data = data[:i+1]
-	} else {
-		data = nil
-	}
-	return data, truncated, err
+
+type conversationLog struct {
+	activity Activity
+	seen     map[string]int
+}
+
+func newConversationLog() conversationLog {
+	return conversationLog{activity: Activity{Kind: "claude", Status: "ready", Messages: []ConversationMessage{}}, seen: map[string]int{}}
 }
 func parseConversation(data []byte) Activity {
-	a := Activity{Kind: "claude", Status: "ready", Messages: []ConversationMessage{}}
-	seen := map[string]int{}
+	c := newConversationLog()
 	for _, line := range bytes.Split(data, []byte{'\n'}) {
-		var entry struct {
-			Type        string `json:"type"`
-			UUID        string `json:"uuid"`
-			Subtype     string `json:"subtype"`
-			IsMeta      bool   `json:"isMeta"`
-			IsSidechain bool   `json:"isSidechain"`
-			Attachment  struct {
-				HookEvent string `json:"hookEvent"`
-			} `json:"attachment"`
-			Message struct {
-				Content    json.RawMessage `json:"content"`
-				StopReason string          `json:"stop_reason"`
-			} `json:"message"`
-		}
-		if json.Unmarshal(line, &entry) != nil || entry.IsSidechain {
-			continue
-		}
-		if entry.Subtype == "turn_duration" || entry.Subtype == "stop_hook_summary" || entry.Attachment.HookEvent == "Stop" {
-			a.Status = "ready"
-			a.Tool = ""
-			continue
-		}
-		if entry.Type != "assistant" && entry.Type != "user" || entry.IsMeta {
-			continue
-		}
-		a.Status = "working"
-		var text string
-		var blocks []struct {
-			Type      string `json:"type"`
-			Text      string `json:"text"`
-			Name      string `json:"name"`
-			Thinking  string `json:"thinking"`
-			Signature string `json:"signature"`
-		}
-		if json.Unmarshal(entry.Message.Content, &text) != nil && json.Unmarshal(entry.Message.Content, &blocks) == nil {
-			var parts []string
-			for _, b := range blocks {
-				if b.Type == "text" {
-					parts = append(parts, b.Text)
-				}
-				if b.Type == "tool_use" {
-					a.Tools++
-					a.Tool = b.Name
-					a.Status = "working"
-				}
-				if b.Type == "thinking" {
-					a.Status = "working"
-					if isClaudeNarration(b.Signature) {
-						parts = append(parts, b.Thinking)
-					}
+		c.consume(line)
+	}
+	return c.activity
+}
+func (c *conversationLog) consume(line []byte) {
+	a := &c.activity
+	var entry struct {
+		Type        string `json:"type"`
+		UUID        string `json:"uuid"`
+		Subtype     string `json:"subtype"`
+		IsMeta      bool   `json:"isMeta"`
+		IsSidechain bool   `json:"isSidechain"`
+		Attachment  struct {
+			HookEvent string `json:"hookEvent"`
+		} `json:"attachment"`
+		Message struct {
+			Content    json.RawMessage `json:"content"`
+			StopReason string          `json:"stop_reason"`
+		} `json:"message"`
+	}
+	if json.Unmarshal(line, &entry) != nil || entry.IsSidechain {
+		return
+	}
+	if entry.Subtype == "turn_duration" || entry.Subtype == "stop_hook_summary" || entry.Attachment.HookEvent == "Stop" {
+		a.Status = "ready"
+		a.Tool = ""
+		return
+	}
+	if entry.Type != "assistant" && entry.Type != "user" || entry.IsMeta {
+		return
+	}
+	a.Status = "working"
+	var text string
+	var blocks []struct {
+		Type      string `json:"type"`
+		Text      string `json:"text"`
+		Name      string `json:"name"`
+		Thinking  string `json:"thinking"`
+		Signature string `json:"signature"`
+	}
+	if json.Unmarshal(entry.Message.Content, &text) != nil && json.Unmarshal(entry.Message.Content, &blocks) == nil {
+		var parts []string
+		for _, b := range blocks {
+			if b.Type == "text" {
+				parts = append(parts, b.Text)
+			}
+			if b.Type == "tool_use" {
+				a.Tools++
+				a.Tool = b.Name
+				a.Status = "working"
+			}
+			if b.Type == "thinking" {
+				a.Status = "working"
+				if isClaudeNarration(b.Signature) {
+					parts = append(parts, b.Thinking)
 				}
 			}
-			text = strings.Join(parts, "\n\n")
 		}
-		if entry.Message.StopReason == "end_turn" || entry.Message.StopReason == "stop_sequence" {
-			a.Status = "ready"
-			a.Tool = ""
-		}
-		text = strings.TrimSpace(text)
-		if strings.HasPrefix(text, "[Request interrupted by user") {
-			a.Status = "ready"
-			a.Tool = ""
-			continue
-		}
-		if text == "" || strings.HasPrefix(text, "<local-command-") || strings.HasPrefix(text, "<command-name>") || strings.HasPrefix(text, "[Request interrupted by user") {
-			continue
-		}
-		key := entry.UUID
-		if key == "" {
-			key = strconv.Itoa(len(a.Messages))
-		}
-		msg := ConversationMessage{ID: key, Role: entry.Type, Text: text}
-		if index, ok := seen[key]; ok {
-			a.Messages[index] = msg
-		} else {
-			seen[key] = len(a.Messages)
-			a.Messages = append(a.Messages, msg)
-		}
+		text = strings.Join(parts, "\n\n")
 	}
-	if len(a.Messages) > 100 {
-		a.Messages = a.Messages[len(a.Messages)-100:]
-		a.Truncated = true
+	if entry.Message.StopReason == "end_turn" || entry.Message.StopReason == "stop_sequence" {
+		a.Status = "ready"
+		a.Tool = ""
 	}
-	return a
+	text = strings.TrimSpace(text)
+	if strings.HasPrefix(text, "[Request interrupted by user") {
+		a.Status = "ready"
+		a.Tool = ""
+		return
+	}
+	if text == "" || strings.HasPrefix(text, "<local-command-") || strings.HasPrefix(text, "<command-name>") || strings.HasPrefix(text, "[Request interrupted by user") {
+		return
+	}
+	key := entry.UUID
+	if key == "" {
+		key = strconv.Itoa(len(a.Messages))
+	}
+	msg := ConversationMessage{ID: key, Role: entry.Type, Text: text}
+	if index, ok := c.seen[key]; ok {
+		a.Messages[index] = msg
+	} else {
+		c.seen[key] = len(a.Messages)
+		a.Messages = append(a.Messages, msg)
+	}
 }
 
 // Chat is a separate operation from terminal input. Never send it to an
