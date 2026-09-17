@@ -58,8 +58,11 @@ export class TerminalPane {
   private send: HTMLButtonElement;
   private currentStatus = "";
   private activity?: Activity;
+  private viewVisible = false;
   private sending = false;
   private frame = 0;
+  private terminalScroll = { top: 0, follow: true };
+  private restoringTerminalScroll = false;
   private saveDraft: (value: string) => void;
   constructor(
     private session: Session,
@@ -84,6 +87,16 @@ export class TerminalPane {
         this.input("\x1b");
       },
     );
+    if (session.program === "claude" || session.program === "codex") {
+      this.agent.setActivity({
+        kind: session.program,
+        status: "starting",
+        canMessage: false,
+        messages: [],
+        tools: 0,
+        truncated: false,
+      });
+    }
     this.saveDraft = actions.draft;
     this.message.value = draft;
     this.message.addEventListener("input", () => {
@@ -149,7 +162,7 @@ export class TerminalPane {
     const context = el("div", "pane-context");
     const tree = project.worktrees.find((w) => w.path === session.path);
     this.connection.hidden = true;
-    context.append(this.agent.heading, this.connection);
+    context.append(this.connection);
     context.title =
       project.git === false
         ? session.path
@@ -180,7 +193,8 @@ export class TerminalPane {
       button.append(icon);
     }
     switcher.append(this.agentButton, this.terminalButton);
-    context.append(switcher);
+    controls.prepend(switcher);
+    identity.title = context.title;
     const surface = el("div", "pane-surface");
     surface.append(this.host, this.agent.element);
     const composer = el("form", "composer");
@@ -203,7 +217,9 @@ export class TerminalPane {
       this.submit();
     };
     composer.append(this.message, this.send);
-    this.element.append(header, context, surface, composer);
+    this.agent.heading.classList.add("composer-activity");
+    this.element.append(header, context, surface, this.agent.heading, composer);
+    context.hidden = true;
     this.terminal = new Terminal({
       cursorBlink: true,
       fontSize,
@@ -217,6 +233,14 @@ export class TerminalPane {
     this.terminal.loadAddon(this.fitAddon);
     this.terminal.open(this.host);
     this.terminal.onData((data) => this.input(data));
+    this.terminal.onScroll(() => {
+      if (
+        this.viewVisible &&
+        !this.restoringTerminalScroll &&
+        this.appearance.view === "terminal"
+      )
+        this.captureTerminalScroll();
+    });
     this.terminal.attachCustomKeyEventHandler((e) => {
       if (
         (e.metaKey || (e.ctrlKey && e.shiftKey)) &&
@@ -274,7 +298,29 @@ export class TerminalPane {
     this.setView(this.appearance.view, false);
     this.update(session);
     this.connect();
-    this.pollActivity();
+  }
+  private captureTerminalScroll(): void {
+    const b = this.terminal.buffer.active;
+    this.terminalScroll = { top: b.viewportY, follow: b.viewportY >= b.baseY };
+  }
+  captureScroll(): void {
+    this.agent.captureScroll();
+    if (this.viewVisible && this.appearance.view === "terminal")
+      this.captureTerminalScroll();
+  }
+  restoreScroll(): void {
+    this.agent.restoreScroll();
+    this.restoringTerminalScroll = true;
+    if (this.terminalScroll.follow) this.terminal.scrollToBottom();
+    else this.terminal.scrollToLine(this.terminalScroll.top);
+    this.restoringTerminalScroll = false;
+  }
+  setVisible(visible: boolean): void {
+    if (this.viewVisible === visible) return;
+    this.viewVisible = visible;
+    this.agent.setVisible(visible);
+    clearTimeout(this.activityTimer);
+    if (visible && !this.activityRequest) void this.pollActivity();
   }
   update(session: Session): void {
     const previous = this.currentStatus;
@@ -312,6 +358,7 @@ export class TerminalPane {
     this.agent.element.hidden = view !== "agent";
     this.refreshComposer();
     this.fit();
+    this.agent.restoreScroll();
     if (focus) {
       reveal(view === "agent" ? this.agent.element : this.host);
       this.saveAppearance();
@@ -325,7 +372,7 @@ export class TerminalPane {
     if (this.disposed) return;
     try {
       if (
-        this.element.isConnected &&
+        this.viewVisible &&
         this.session.status === "running" &&
         !document.hidden
       ) {
@@ -345,16 +392,18 @@ export class TerminalPane {
           }
         } finally {
           clearTimeout(timeout);
+          this.activityRequest = undefined;
         }
       }
     } catch {
       if (!this.disposed) {
-        this.activity = undefined;
+        if (this.activity)
+          this.activity = { ...this.activity, canMessage: false };
         this.agent.unavailable();
         this.refreshComposer();
       }
     }
-    if (!this.disposed)
+    if (!this.disposed && this.viewVisible)
       this.activityTimer = setTimeout(() => this.pollActivity(), 2000);
   }
   private readScreen(): void {
@@ -472,10 +521,15 @@ export class TerminalPane {
       this.sending = true;
       this.refreshComposer();
       this.agent.showError("");
+      const pendingId = this.agent.beginMessage(text);
       try {
         // The server rechecks the foreground process on every chat submission.
         await api(`/terminals/${this.session.id}/message`, "POST", { text });
+        this.agent.finishMessage(pendingId, true);
+        clearTimeout(this.activityTimer);
+        if (!this.activityRequest && this.viewVisible) void this.pollActivity();
       } catch (error) {
+        this.agent.finishMessage(pendingId, false);
         this.agent.showError(
           error instanceof Error ? error.message : String(error),
         );
@@ -554,7 +608,12 @@ export class TerminalPane {
       )
         return;
       this.resizeComposer();
+      this.restoringTerminalScroll = true;
       this.fitAddon.fit();
+      if (this.terminalScroll.follow) this.terminal.scrollToBottom();
+      else this.terminal.scrollToLine(this.terminalScroll.top);
+      this.restoringTerminalScroll = false;
+      this.agent.restoreScroll();
       if (this.socket?.readyState === WebSocket.OPEN)
         this.socket.send(
           JSON.stringify({
@@ -574,11 +633,13 @@ export class TerminalPane {
     return this.terminal.getSelection();
   }
   focus(): void {
-    if (this.appearance.view === "agent") this.message.focus();
+    if (this.appearance.view === "agent")
+      this.message.focus({ preventScroll: true });
     else this.terminal.focus();
   }
   dispose(): void {
     this.disposed = true;
+    this.agent.setVisible(false);
     clearTimeout(this.timer);
     clearTimeout(this.activityTimer);
     clearTimeout(this.screenTimer);
@@ -588,5 +649,8 @@ export class TerminalPane {
     this.socket?.close();
     this.terminal.dispose();
     this.element.remove();
+  }
+  get hasPendingSend(): boolean {
+    return this.sending;
   }
 }

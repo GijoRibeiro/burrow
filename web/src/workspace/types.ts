@@ -24,6 +24,7 @@ export interface Project {
   error?: string;
 }
 export interface Session {
+  liveStatus?: "working" | "idle" | "waiting";
   headId?: string;
   role?: "head";
   goal?: string;

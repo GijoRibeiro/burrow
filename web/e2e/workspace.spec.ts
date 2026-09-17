@@ -481,7 +481,8 @@ test("retro companions and quiet conversations share the live terminal", async (
   await expect(
     pane.getByRole("button", { name: "Agent view", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
-  await expect(pane.locator(".agent-status-label")).toHaveText("thinking...");
+  await expect(pane.locator(".composer-activity")).toHaveClass(/is-thinking/);
+  await expect(pane.locator(".agent-status-label")).toHaveText(/.+…$/);
   await expect(pane.locator(".conversation-message")).toHaveCount(2);
   await expect(pane.locator(".agent-content")).not.toContainText("HIDDEN_");
   const fonts = await page.evaluate(async () => {
@@ -2860,4 +2861,322 @@ test("active-agent sidebar hides empty worktrees and stopped agents while preser
   await expect(group.locator(".worktree-row")).toHaveCount(5);
   await expect(group.locator(".session-row")).toHaveCount(4);
   await expect(page.locator('[data-project-id="inactive"]')).toBeVisible();
+});
+
+test("canvas keeps conversations warm, sends immediately, pins two agents and resizes", async ({
+  page,
+}, info) => {
+  const project = await (
+    await page.request.post("/api/workspace/projects", {
+      data: {
+        path: join(process.env.CLOOVIES_E2E_ROOT!, "Newbit"),
+        name: "Newbit",
+      },
+    })
+  ).json();
+  const agents = [];
+  for (const name of ["Warm head", "Warm worker"])
+    agents.push(
+      await (
+        await page.request.post("/api/workspace/terminals", {
+          data: {
+            projectId: project.id,
+            path: project.path,
+            name,
+            program: "claude",
+          },
+        })
+      ).json(),
+    );
+  const [head, worker] = agents;
+  await page.route("**/api/workspace", async (route) => {
+    const response = await route.fetch();
+    const s = await response.json();
+    s.terminals = s.terminals.map((t: any) =>
+      t.id === head.id
+        ? { ...t, role: "head", liveStatus: "idle" }
+        : t.id === worker.id
+          ? { ...t, headId: head.id, liveStatus: "working" }
+          : t,
+    );
+    await route.fulfill({ json: s });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Team canvas", exact: true }).click();
+  await page.getByLabel("Team shown on canvas").selectOption(head.id);
+  await page
+    .getByRole("button", { name: "Open Warm head on canvas", exact: true })
+    .click();
+  const pane = page.getByRole("region", {
+    name: "Warm head terminal",
+    exact: true,
+  });
+  await expect(
+    pane.getByRole("button", { name: "Send message", exact: true }),
+  ).toBeEnabled();
+  await pane.evaluate((el) => ((window as any).__warmPane = el));
+  let release!: () => void;
+  const hold = new Promise<void>((resolve) => (release = resolve));
+  await page.route(
+    `**/api/workspace/terminals/${head.id}/message`,
+    async (route) => {
+      await hold;
+      await route.continue();
+    },
+  );
+  const input = pane.getByRole("textbox", {
+    name: "Message to Warm head",
+    exact: true,
+  });
+  await input.fill("Hello immediately");
+  await input.press("Enter");
+  await expect(pane.locator(".pending-message")).toContainText(
+    "Hello immediately",
+  );
+  await expect(pane.locator(".message-delivery")).toHaveText("Sending…");
+  release();
+  await expect(input).toHaveValue("");
+  await expect(pane.locator(".pending-message")).toHaveCount(0);
+  await expect(pane.locator(".conversation-message.user")).toHaveCount(1);
+  await page
+    .getByRole("button", { name: "Open Warm worker on canvas", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Open Warm head on canvas", exact: true })
+    .click();
+  expect(await pane.evaluate((el) => el === (window as any).__warmPane)).toBe(
+    true,
+  );
+  await expect(pane.locator(".agent-content")).toContainText(
+    "Hello immediately",
+  );
+  const history = Array.from(
+    { length: 35 },
+    (_, i) =>
+      `Paragraph ${i + 1}: Keeping the conversation readable while switching between agents.`,
+  ).join("\n\n");
+  await page.request.post(`/api/workspace/terminals/${head.id}/message`, {
+    data: { text: history },
+  });
+  const conversation = pane.locator(".agent-content");
+  await expect(conversation).toContainText("Paragraph 35");
+  const distanceFromBottom = () =>
+    conversation.evaluate(
+      (el) => el.scrollHeight - el.scrollTop - el.clientHeight,
+    );
+  await expect.poll(distanceFromBottom).toBeLessThan(3);
+  await conversation.evaluate((el) => {
+    el.scrollTop = 180;
+    el.dispatchEvent(new Event("scroll"));
+  });
+  await page
+    .getByRole("button", { name: "Open Warm worker on canvas", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Open Warm head on canvas", exact: true })
+    .click();
+  await expect
+    .poll(() => conversation.evaluate((el) => el.scrollTop))
+    .toBeCloseTo(180, 0);
+  await conversation.evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+    el.dispatchEvent(new Event("scroll"));
+  });
+  await page
+    .getByRole("button", { name: "Open Warm worker on canvas", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Open Warm head on canvas", exact: true })
+    .click();
+  await expect.poll(distanceFromBottom).toBeLessThan(3);
+  await pane
+    .getByRole("button", { name: "Terminal view", exact: true })
+    .click();
+  await pane.locator(".terminal-host").hover();
+  await page.mouse.wheel(0, -450);
+  const historyPosition = () =>
+    tmux(
+      "display-message",
+      "-p",
+      "-t",
+      `=cw-${head.id}:`,
+      "#{pane_in_mode} #{scroll_position}",
+    ).trim();
+  await expect.poll(historyPosition).toMatch(/^1 /);
+  const rawScroll = historyPosition();
+  await page
+    .getByRole("button", { name: "Open Warm worker on canvas", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Open Warm head on canvas", exact: true })
+    .click();
+  await expect.poll(historyPosition).toBe(rawScroll);
+  await pane.locator(".xterm-helper-textarea").focus();
+  await page.keyboard.press("q");
+  await expect.poll(historyPosition).toBe("0");
+  await pane.getByRole("button", { name: "Agent view", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Keep agent open on canvas", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Open Warm worker on canvas", exact: true })
+    .click();
+  await expect(page.locator(".team-dock-card")).toHaveCount(2);
+  await page
+    .getByRole("button", { name: "Open Warm head on canvas", exact: true })
+    .click();
+  await expect(page.locator(".team-dock-card")).toHaveCount(2);
+  const dock = page.locator(".team-dock"),
+    handle = page.getByRole("separator", {
+      name: "Resize canvas terminal panel",
+    });
+  const old = (await dock.boundingBox())!.width,
+    box = (await handle.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + 100);
+  await page.mouse.down();
+  await page.mouse.move(box.x - 210, box.y + 100, { steps: 12 });
+  await page.mouse.up();
+  await expect
+    .poll(async () => (await dock.boundingBox())!.width)
+    .toBeGreaterThan(old + 100);
+  const width = (await dock.boundingBox())!.width;
+  const inner = page.getByRole("separator", {
+    name: "Resize rows",
+    exact: true,
+  });
+  await inner.focus();
+  await inner.press("ArrowDown");
+  const card = page.locator(`[data-node-id="${worker.id}"]`);
+  await expect(card).toHaveClass(/is-working/);
+  await expect(card).toContainText("Working now");
+  await expect(page.locator(".team-wires path")).toHaveCSS(
+    "stroke-dasharray",
+    /\d/,
+  );
+  expect(
+    await pane.evaluate((el) =>
+      el
+        .querySelector(".composer")!
+        .previousElementSibling!.classList.contains("composer-activity"),
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: info.outputPath("two-warm-conversations.png"),
+  });
+  await page.reload();
+  await expect(page.locator(".team-dock-card")).toHaveCount(2);
+  await expect
+    .poll(async () => Math.abs((await dock.boundingBox())!.width - width))
+    .toBeLessThan(4);
+  await page
+    .getByRole("button", { name: "Close pinned canvas terminal", exact: true })
+    .click();
+  await expect(page.locator(".team-dock-card")).toHaveCount(1);
+  await page.setViewportSize({ width: 740, height: 1000 });
+  await expect(handle).toHaveAttribute("aria-orientation", "horizontal");
+  await page.locator(".team-dock .terminal-pane").evaluate(async (el) => {
+    await Promise.allSettled(el.getAnimations().map((a) => a.finished));
+  });
+  await page.screenshot({
+    path: info.outputPath("narrow-canvas-conversation.png"),
+  });
+});
+
+test("Slack product inbox scans on demand and preserves review controls", async ({
+  page,
+}, info) => {
+  const finding = {
+    id: "complaint-1",
+    title: "Mobile document clipped",
+    summary: "The KYC viewer clips the document on phones.",
+    quote: "I have to rotate the phone to read the name.",
+    area: "KYC",
+    channel: "kyc-cc",
+    url: "https://example.slack.com/archives/C123/p123456789",
+    reportedAt: new Date().toISOString(),
+    foundAt: new Date().toISOString(),
+    status: "new",
+  };
+  let state: any = {
+    settings: { enabled: false, channels: "product-questions, kyc-cc" },
+    findings: [],
+    running: false,
+    lastStarted: "",
+    lastSuccess: "",
+    summary: "",
+    error: "",
+  };
+  await page.route("**/api/workspace/complaints**", async (route) => {
+    const req = route.request(),
+      path = new URL(req.url()).pathname;
+    if (path.endsWith("/settings")) state.settings = req.postDataJSON();
+    else if (path.endsWith("/scan") && req.method() === "POST") {
+      state.running = true;
+      state.error = "";
+    } else if (path.endsWith("/scan") && req.method() === "DELETE") {
+      state.running = false;
+      state.error = "Scan canceled";
+    } else if (req.method() === "PATCH")
+      state.findings[0].status = req.postDataJSON().status;
+    await route.fulfill({ json: req.method() === "GET" ? state : {} });
+  });
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: "Product complaints inbox", exact: true })
+    .click();
+  const dialog = page.getByRole("dialog", {
+    name: "Product complaints inbox",
+    exact: true,
+  });
+  await expect(
+    dialog.getByRole("checkbox", { name: "Scan Slack hourly" }),
+  ).not.toBeChecked();
+  await dialog
+    .getByRole("button", { name: "Scan Slack now", exact: true })
+    .click();
+  await expect(dialog.getByRole("status")).toContainText("Scanning Slack");
+  await expect(
+    dialog.getByRole("button", { name: "Cancel Slack scan" }),
+  ).toBeVisible();
+  state = {
+    ...state,
+    running: false,
+    findings: [{ ...finding }],
+    lastSuccess: new Date().toISOString(),
+    summary: "Searched the chosen channels.",
+  };
+  await expect(dialog.locator(".complaint-card")).toHaveCount(1);
+  await expect(
+    dialog.getByRole("link", { name: "Open Slack thread" }),
+  ).toHaveAttribute("href", finding.url);
+  await dialog.evaluate((el) => (el.scrollTop = 0));
+  await expect(dialog).toHaveCSS("width", "940px");
+  await page.screenshot({ path: info.outputPath("product-inbox.png") });
+  await dialog
+    .getByRole("button", { name: "Mark Mobile document clipped reviewed" })
+    .click();
+  await expect(dialog.locator(".complaint-card")).toHaveCount(0);
+  await dialog.getByLabel("Finding status").selectOption("reviewed");
+  await expect(dialog.locator(".complaint-card")).toHaveCount(1);
+  await dialog.getByLabel("Slack channels").fill("product-questions, finance");
+  await dialog.getByLabel("Scan Slack hourly").check();
+  await dialog
+    .getByRole("button", { name: "Save Slack scan settings" })
+    .click();
+  await expect
+    .poll(() => state.settings.channels)
+    .toBe("product-questions, finance");
+  await dialog.getByRole("button", { name: "Close product inbox" }).click();
+  await page
+    .getByRole("button", { name: "Product complaints inbox", exact: true })
+    .click();
+  await expect(dialog.getByLabel("Scan Slack hourly")).toBeChecked();
+  await expect(dialog.getByLabel("Slack channels")).toHaveValue(
+    "product-questions, finance",
+  );
+  await dialog
+    .getByRole("button", { name: "Scan Slack now", exact: true })
+    .click();
+  await dialog.getByRole("button", { name: "Cancel Slack scan" }).click();
+  await expect(dialog.getByRole("alert")).toHaveText("Scan canceled");
 });

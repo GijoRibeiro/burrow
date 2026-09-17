@@ -12,7 +12,7 @@ function minimumSize(tree: Tree): { width: number; height: number } {
 }
 export function renderSplitTree(
   tree: Tree,
-  panes: Map<string, TerminalPane>,
+  panes: Map<string, Pick<TerminalPane, "element">>,
   persist: () => void,
 ): HTMLElement {
   if ("terminal" in tree) return panes.get(tree.terminal)?.element || el("div");

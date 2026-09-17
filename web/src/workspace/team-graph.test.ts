@@ -63,6 +63,13 @@ it("opens canvas actions without capturing macOS Control-click as a drag", () =>
     projects: [],
   } as unknown as Workspace;
   const menu = vi.fn();
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
   const graph = new TeamGraph({
     state: () => state,
     color: () => "#aaaaaa",

@@ -94,7 +94,16 @@ the filter off. Filtering never stops or removes a terminal.
 
 Agent conversations render Markdown headings, lists, emphasis, tables, and code
 inside a comfortable reading column. Links and local image previews remain
-interactive, and text-size controls also resize the conversation.
+interactive, and text-size controls also resize the conversation. Your message appears
+immediately while delivery is confirmed. Recent conversations stay mounted in a
+bounded cache when you switch nodes; returning refreshes them in the background.
+
+Drag the divider beside the canvas to widen a conversation. **Pin** keeps one agent
+open while you select a second; drag between the two conversations to resize them.
+Double-click either divider to balance it. Connections choose facing node edges
+and use dashed lines. Claude’s live process status drives working animations,
+separately from a task being ready for review. The creature and rotating activity
+caption sit immediately above the input.
 
 
 Right-click a checkout to **Create child worktree…**, or right-click an agent to **Delegate task…**. Delegation starts Claude or Codex in an independent child checkout with task context. Use **Tasks and inbox** to read messages, reply, follow status, and review completed changes before explicitly integrating them into the parent. Existing agents can opt in using the panel's connection instructions. Messages are persistent and read when agents check their inbox; ordinary terminals and worktrees continue to work independently.
@@ -105,12 +114,36 @@ For development app replacements while agents are running, follow the
 [macOS update procedure](docs/MACOS-UPDATES.md) to preserve sessions without
 creating repeated folder permission prompts.
 
+## Product complaints inbox
+
+Open **Product inbox** in the sidebar, choose Slack channels, and click **Scan now**.
+The scanner uses Claude Code and its connected Slack account to search product,
+UI/UX, backoffice, portal, KYC, finance, and bug reports. Each finding has a short
+source quote and a link to the original Slack message. Search or filter by area,
+mark findings reviewed, or dismiss them; overlapping scans preserve that state.
+The sidebar shows the number of new findings.
+
+The first scan covers seven days. Later scans overlap the last successful scan by
+a day. A scan is bounded to three minutes, 50 findings, and a $1 Claude CLI budget;
+partial coverage and connection errors are shown explicitly. Scanning uses your
+Claude account usage. Start with named channels for useful coverage; a blank scope
+searches accessible channels excluding direct messages. Search-based discovery
+cannot guarantee every complaint will be found.
+
+**Scan hourly** is off by default. When enabled, it runs while the app/server is
+running, including with the window closed. Quitting the app pauses scans. Settings
+and findings are saved privately in `~/.cloovies/complaints.json`. Scans use read
+tools with non-interactive permissions, no project settings or hooks, and explicit
+Slack write-tool denials. They do not send Slack replies or create tickets.
+
 ## Persistence and boundaries
 
 - Project and terminal metadata: `~/.cloovies/workspace.json`, saved atomically.
 - Shell processes and history: a dedicated tmux server named `cloovies-workspace`. It does not attach to or kill Orca's or other apps' sessions.
 - Visible layout, pane view choices, creatures, unsent message drafts, and terminal font size: the browser/webview's local storage. Native and browser layouts are independent.
-- Closing or restarting Cloovies preserves shells. Rebooting the computer ends processes; the saved sessions can then be started again.
+- Closing or restarting Cloovies preserves shells. Quitting stops the app’s HTTP
+  server, so head coordination tools and scheduled scans resume when the app
+  reopens; the underlying agents and terminals keep running. Rebooting the computer ends processes; the saved sessions can then be started again.
 - The server listens only on loopback. Workspace requests require a local host and same-origin requests; mutations require JSON.
 - The native app uses port 4340. Its log is `~/Library/Logs/Cloovies/workspace.log`. `CLOOVIES_NATIVE_PORT` can select a different native port.
 - Tests use separate folders and tmux sockets. For another isolated instance, set both `CLOOVIES_WORKSPACE_DIR` and `CLOOVIES_TMUX_SOCKET`.
