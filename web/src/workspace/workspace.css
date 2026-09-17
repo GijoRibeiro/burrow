@@ -1344,13 +1344,40 @@ textarea {
 .needs-attention .thinking-star::after {
   content: "!";
 }
+.agent-notices {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin: 8px 12px 0;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--terminal-color) 16%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--terminal-color) 5%, var(--bg));
+}
 .terminal-notice {
-  padding: 9px 12px;
-  border-bottom: 1px solid var(--ink);
-  color: var(--bg);
-  background: var(--ink);
+  flex: 1;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--muted);
+  background: transparent;
   text-align: left;
-  font-size: 15px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.terminal-notice:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--terminal-color) 8%, transparent);
+}
+.terminal-notice:focus-visible {
+  outline-color: var(--terminal-color);
+}
+.interrupt-notice {
+  flex: none;
+  color: var(--terminal-color);
+  white-space: nowrap;
 }
 .agent-content {
   flex: 1;
