@@ -25,6 +25,18 @@ process.stdin.on('data', data => {
       for (const message of run('inbox')) run('ack', message.id);
       run('send', 'parent', 'Existing agent connected; current work preserved.');
     }
+    if (text.startsWith('Fixture queued prompt:')) {
+      const sequence = ++turn;
+      const progress = `Live progress for queued turn ${sequence}`;
+      fs.appendFileSync(transcript, JSON.stringify({type:'assistant',uuid:`progress-${sequence}`,message:{content:progress}})+'\n');
+      process.stdout.write(progress+'\r\n');
+      setTimeout(() => {
+        const reply = `Queued prompt received: ${text}`;
+        fs.appendFileSync(transcript, JSON.stringify({type:'attachment',uuid:`attachment-${sequence}`,attachment:{type:'queued_command',commandMode:'prompt',origin:{kind:'human'},source_uuid:`u${sequence}`,prompt:text}})+'\n'+JSON.stringify({type:'assistant',uuid:`a${sequence}`,message:{content:reply,stop_reason:'end_turn'}})+'\n');
+        process.stdout.write(reply.replaceAll('\n','\r\n')+'\r\n');
+      }, 6000);
+      continue;
+    }
     const response = `Claude received: ${text}`;
     fs.appendFileSync(transcript, JSON.stringify({ type: 'user', uuid: `u${++turn}`, message: { content: text } }) + '\n' + JSON.stringify({ type: 'assistant', uuid: `a${turn}`, message: { content: response, stop_reason: 'end_turn' } }) + '\n');
     process.stdout.write(response.replaceAll('\n', '\r\n') + '\r\n');

@@ -220,7 +220,14 @@ func (c *conversationLog) consume(line []byte) {
 			Kind string `json:"kind"`
 		} `json:"origin"`
 		Attachment struct {
-			HookEvent string `json:"hookEvent"`
+			HookEvent   string          `json:"hookEvent"`
+			Type        string          `json:"type"`
+			Prompt      json.RawMessage `json:"prompt"`
+			SourceUUID  string          `json:"source_uuid"`
+			CommandMode string          `json:"commandMode"`
+			Origin      struct {
+				Kind string `json:"kind"`
+			} `json:"origin"`
 		} `json:"attachment"`
 		Message struct {
 			Content    json.RawMessage `json:"content"`
@@ -229,6 +236,15 @@ func (c *conversationLog) consume(line []byte) {
 	}
 	if json.Unmarshal(line, &entry) != nil || entry.IsSidechain {
 		return
+	}
+	// Prompts submitted while Claude is busy are consumed as attachments,
+	// not normal user records. This is the native acknowledgement of that input.
+	if entry.Type == "attachment" && entry.Attachment.Type == "queued_command" && entry.Attachment.CommandMode == "prompt" && entry.Attachment.Origin.Kind == "human" {
+		entry.Type = "user"
+		entry.Message.Content = entry.Attachment.Prompt
+		if entry.Attachment.SourceUUID != "" {
+			entry.UUID = entry.Attachment.SourceUUID
+		}
 	}
 	if entry.Subtype == "turn_duration" || entry.Subtype == "stop_hook_summary" || entry.Attachment.HookEvent == "Stop" {
 		a.Status = "ready"

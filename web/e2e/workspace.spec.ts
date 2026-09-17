@@ -4122,3 +4122,78 @@ test("chat retains complete public history across large tool results and new rep
   ).json();
   expect(response.messages).toHaveLength(152);
 });
+
+test("busy Claude follow-ups acknowledge once and never cover later replies", async ({
+  page,
+  request,
+}) => {
+  const folder = join(process.env.CLOOVIES_E2E_ROOT!, "BusyFollowups");
+  mkdirSync(folder, { recursive: true });
+  const project = await (
+    await request.post("/api/workspace/projects", {
+      data: { path: folder, name: "Busy QA" },
+    })
+  ).json();
+  const terminal = await (
+    await request.post("/api/workspace/terminals", {
+      data: { projectId: project.id, name: "Busy agent", program: "claude" },
+    })
+  ).json();
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: "Show Busy agent", exact: true })
+    .click();
+  const pane = page.getByRole("region", {
+    name: "Busy agent terminal",
+    exact: true,
+  });
+  const input = pane.getByRole("textbox", {
+    name: "Message to Busy agent",
+    exact: true,
+  });
+  await expect(
+    pane.getByRole("button", { name: "Send message", exact: true }),
+  ).toBeEnabled();
+  const first = "Fixture queued prompt: First follow-up while working";
+  const second = "Fixture queued prompt: Second follow-up while working";
+  await input.fill(first);
+  await input.press("Enter");
+  await expect(input).toHaveValue("");
+  await input.fill(second);
+  await input.press("Enter");
+  await expect(input).toHaveValue("");
+  await expect(pane.locator(".pending-message")).toHaveCount(2);
+  await expect(pane.locator(".conversation-message.assistant")).toHaveCount(2);
+  const order = await pane.locator(".conversation-message").allTextContents();
+  expect(order.findIndex((text) => text.includes(first))).toBeLessThan(
+    order.findIndex((text) => text.includes("Live progress for queued turn 1")),
+  );
+  expect(order.findIndex((text) => text.includes(second))).toBeLessThan(
+    order.findIndex((text) => text.includes("Live progress for queued turn 2")),
+  );
+  await expect(pane.locator(".pending-message")).toHaveCount(0, {
+    timeout: 15000,
+  });
+  await expect(pane.locator(".conversation-message.user")).toHaveCount(2);
+  await expect(pane.locator(".conversation-message").last()).toContainText(
+    `Queued prompt received: ${second}`,
+  );
+  await expect
+    .poll(() =>
+      pane
+        .locator(".agent-content")
+        .evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight),
+    )
+    .toBeLessThan(3);
+  await page.reload();
+  await expect(pane.locator(".conversation-message.user")).toHaveCount(2);
+  await expect(pane.locator(".pending-message")).toHaveCount(0);
+  const activity = await (
+    await request.get(`/api/workspace/terminals/${terminal.id}/activity`)
+  ).json();
+  expect(
+    activity.messages
+      .filter((m: any) => m.role === "user")
+      .map((m: any) => m.text),
+  ).toEqual([first, second]);
+});

@@ -217,3 +217,58 @@ it("keeps existing message DOM and reconciles outgoing arrivals without replayin
   ).toEqual(["0ms", "45ms", "90ms", "135ms"]);
   view.dispose();
 });
+
+it("keeps pending prompts before later live replies and reconciles busy receipts", () => {
+  const view = new AgentView(
+    "Grook",
+    "test",
+    () => {},
+    async () => {},
+    () => {},
+  );
+  const state: Activity = {
+    kind: "claude",
+    canMessage: true,
+    status: "working",
+    tools: 0,
+    truncated: false,
+    messages: [{ id: "old", role: "assistant", text: "Working already" }],
+  };
+  view.setActivity(state);
+  const first = view.beginMessage("First follow-up");
+  view.finishMessage(first, true);
+  const second = view.beginMessage("Second follow-up");
+  view.finishMessage(second, true);
+  const progress = {
+    id: "progress",
+    role: "assistant",
+    text: "New progress after the sends",
+  };
+  view.setActivity({ ...state, messages: [...state.messages, progress] });
+  const articles = () => [
+    ...view.element.querySelectorAll<HTMLElement>("article"),
+  ];
+  expect(articles().map((node) => node.dataset.messageId)).toEqual([
+    "old",
+    first,
+    second,
+    "progress",
+  ]);
+  expect(view.element.textContent).not.toContain("waiting for agent");
+  const firstNode = articles()[1],
+    secondNode = articles()[2];
+  view.setActivity({
+    ...state,
+    messages: [
+      ...state.messages,
+      progress,
+      { id: "receipt-1", role: "user", text: "First follow-up" },
+      { id: "receipt-2", role: "user", text: "Second follow-up" },
+      { id: "reply", role: "assistant", text: "Both follow-ups received" },
+    ],
+  });
+  expect(view.element.querySelectorAll(".pending-message")).toHaveLength(0);
+  expect(articles()[2]).toBe(firstNode);
+  expect(articles()[3]).toBe(secondNode);
+  expect(articles().at(-1)?.textContent).toContain("Both follow-ups received");
+});
