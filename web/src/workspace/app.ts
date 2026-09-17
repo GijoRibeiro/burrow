@@ -80,7 +80,7 @@ class WorkspaceApp {
     "+ Head agent",
   );
   private activeFilter = button(
-    "Show only projects with running agents",
+    "Show only running agents and their worktrees",
     () => {
       this.onlyActive = !this.onlyActive;
       this.activeFilter.setAttribute("aria-pressed", String(this.onlyActive));
