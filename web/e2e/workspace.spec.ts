@@ -3180,3 +3180,115 @@ test("Slack product inbox scans on demand and preserves review controls", async 
   await dialog.getByRole("button", { name: "Cancel Slack scan" }).click();
   await expect(dialog.getByRole("alert")).toHaveText("Scan canceled");
 });
+
+test("running app ports belong to their checkout and open from both terminal views", async ({
+  page,
+  request,
+}, info) => {
+  const dir = join(process.env.CLOOVIES_E2E_ROOT!, "Hosted Apps");
+  mkdirSync(dir, { recursive: true });
+  const fixture = join(dir, "server.cjs");
+  writeFileSync(
+    fixture,
+    `require('node:fs').writeFileSync('pid.txt',String(process.pid));require('node:http').createServer((req,res)=>res.end('Hosted app fixture')).listen(0,'127.0.0.1',function(){require('node:fs').writeFileSync('port.txt',String(this.address().port))})`,
+  );
+  const project = await (
+    await request.post("/api/workspace/projects", {
+      data: { path: dir, name: "App links fixture" },
+    })
+  ).json();
+  const terminal = await (
+    await request.post("/api/workspace/terminals", {
+      data: {
+        projectId: project.id,
+        path: dir,
+        name: "Hosted app fixture",
+        program: "shell",
+      },
+    })
+  ).json();
+  try {
+    // Detached listener has no terminal ancestry: checkout discovery must find it.
+    tmux(
+      "send-keys",
+      "-t",
+      `cw-${terminal.id}`,
+      `node -e "require('node:child_process').spawn(process.execPath,['server.cjs'],{detached:true,stdio:'ignore'}).unref()"`,
+      "Enter",
+    );
+    await expect.poll(() => existsSync(join(dir, "port.txt"))).toBeTruthy();
+    const port = Number(
+      execFileSync("cat", [join(dir, "port.txt")], { encoding: "utf8" }),
+    );
+    await expect
+      .poll(
+        async () =>
+          (await (await request.get("/api/workspace/servers")).json())[
+            terminal.id
+          ]?.[0]?.port,
+        { timeout: 20_000 },
+      )
+      .toBe(port);
+    expect(
+      (await (await request.get("/api/workspace/servers")).json())[
+        terminal.id
+      ][0].source,
+    ).toBe("checkout");
+    await page.goto("/");
+    // Switch to the fixture using the sidebar, independent of saved layout.
+    const show = page.getByRole("button", {
+      name: "Show Hosted app fixture",
+      exact: true,
+    });
+    await expect(show).toBeVisible();
+    await show.click();
+    const pane = page.getByRole("region", {
+      name: "Hosted app fixture terminal",
+      exact: true,
+    });
+    await expect(pane).toBeVisible();
+    const link = pane.getByRole("link", {
+      name: `localhost:${port} ↗`,
+      exact: true,
+    });
+    await expect(link).toBeVisible({ timeout: 20_000 });
+    await expect(link).toHaveAttribute("href", `http://localhost:${port}/`);
+    for (const view of ["Agent view", "Terminal view"]) {
+      await pane.getByRole("button", { name: view, exact: true }).click();
+      await expect(link).toBeVisible();
+    }
+    const popupPromise = page.waitForEvent("popup");
+    await link.click();
+    const popup = await popupPromise;
+    await expect(popup.locator("body")).toHaveText("Hosted app fixture");
+    await popup.close();
+    await page.screenshot({ path: info.outputPath("running-app-links.png") });
+    // Stop only this disposable server, then prove stale links disappear.
+    const pid = execFileSync("lsof", ["-t", `-iTCP:${port}`, "-sTCP:LISTEN"], {
+      encoding: "utf8",
+    }).trim();
+    process.kill(Number(pid), "SIGTERM");
+    await expect(link).toHaveCount(0, { timeout: 20_000 });
+    await pane
+      .getByRole("button", { name: "Running apps", exact: true })
+      .click();
+    await expect(
+      pane.getByText("No web app running in this terminal or checkout yet."),
+    ).toBeVisible();
+  } finally {
+    if (existsSync(join(dir, "pid.txt"))) {
+      try {
+        process.kill(
+          Number(
+            execFileSync("cat", [join(dir, "pid.txt")], { encoding: "utf8" }),
+          ),
+          "SIGTERM",
+        );
+      } catch {}
+    }
+    await request.patch(`/api/workspace/terminals/${terminal.id}`, {
+      data: { action: "stop" },
+    });
+    await request.delete(`/api/workspace/projects/${project.id}`);
+  }
+});

@@ -158,7 +158,9 @@ final class WorkspaceApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
     }
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url else { decisionHandler(.cancel); return }
-        if navigationAction.navigationType == .linkActivated && ["http", "https"].contains(url.scheme ?? "") {
+        // WebKit can report target=_blank / noopener links as .other.
+        // Handle new-window HTTP links here before the navigation is cancelled.
+        if ["http", "https"].contains(url.scheme ?? "") && (navigationAction.navigationType == .linkActivated || navigationAction.targetFrame == nil) {
             NSWorkspace.shared.open(url)
             decisionHandler(.cancel)
         } else if url.scheme == "about" || (url.host == baseURL.host && url.port == baseURL.port) {

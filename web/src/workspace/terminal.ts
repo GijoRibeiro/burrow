@@ -2,6 +2,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { api } from "./api";
+import { HostedApps } from "./hosted-apps";
 import { reveal } from "./motion";
 import conversationIcon from "../../assets/icons/conversation.svg";
 import terminalIcon from "../../assets/icons/terminal.svg";
@@ -36,6 +37,7 @@ interface Actions {
 export class TerminalPane {
   readonly element = el("section", "terminal-pane");
   private terminal: Terminal;
+  private hostedApps: HostedApps;
   private host = el("div", "terminal-host");
   private agent: AgentView;
   private appearance: PaneAppearance;
@@ -97,6 +99,7 @@ export class TerminalPane {
         truncated: false,
       });
     }
+    this.hostedApps = new HostedApps(session.id);
     this.saveDraft = actions.draft;
     this.message.value = draft;
     this.message.addEventListener("input", () => {
@@ -158,6 +161,7 @@ export class TerminalPane {
       this.restartButton,
       button("Hide terminal", actions.hide, "icon-button", "×"),
     );
+    controls.prepend(this.hostedApps.toggle);
     header.append(identity, controls);
     const context = el("div", "pane-context");
     const tree = project.worktrees.find((w) => w.path === session.path);
@@ -218,7 +222,14 @@ export class TerminalPane {
     };
     composer.append(this.message, this.send);
     this.agent.heading.classList.add("composer-activity");
-    this.element.append(header, context, surface, this.agent.heading, composer);
+    this.element.append(
+      header,
+      context,
+      this.hostedApps.element,
+      surface,
+      this.agent.heading,
+      composer,
+    );
     context.hidden = true;
     this.terminal = new Terminal({
       cursorBlink: true,
@@ -318,6 +329,7 @@ export class TerminalPane {
   setVisible(visible: boolean): void {
     if (this.viewVisible === visible) return;
     this.viewVisible = visible;
+    this.hostedApps.setVisible(visible);
     this.agent.setVisible(visible);
     clearTimeout(this.activityTimer);
     if (visible && !this.activityRequest) void this.pollActivity();
@@ -639,6 +651,7 @@ export class TerminalPane {
   }
   dispose(): void {
     this.disposed = true;
+    this.hostedApps.dispose();
     this.agent.setVisible(false);
     clearTimeout(this.timer);
     clearTimeout(this.activityTimer);

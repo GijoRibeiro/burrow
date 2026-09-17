@@ -64,6 +64,7 @@ type State struct {
 	TmuxAvailable  bool                            `json:"tmuxAvailable"`
 }
 type Manager struct {
+	servers    serverDiscovery
 	complaints complaintMonitor
 	github     githubState
 	planMu     sync.Mutex
