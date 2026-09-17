@@ -30,7 +30,7 @@ export function imagePaths(text: string): string[] {
   return [...paths].slice(0, 8);
 }
 
-function openImage(src: string, path: string): void {
+export function openImage(src: string, path: string): void {
   const dialog = el("dialog", "dialog image-dialog");
   dialog.setAttribute("aria-label", `Image preview: ${path.split("/").pop()}`);
   const header = el("div", "image-dialog-header");

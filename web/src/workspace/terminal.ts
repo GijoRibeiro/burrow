@@ -3,6 +3,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { api } from "./api";
 import { HostedApps } from "./hosted-apps";
+import { ComposerImages } from "./composer-images";
 import { reveal } from "./motion";
 import conversationIcon from "../../assets/icons/conversation.svg";
 import terminalIcon from "../../assets/icons/terminal.svg";
@@ -51,6 +52,7 @@ export class TerminalPane {
   private stopButton: HTMLButtonElement;
   private restartButton: HTMLButtonElement;
   private message = el("textarea", "message-input");
+  private images: ComposerImages;
   private composerMeasureKey = "";
   private composerMeasure = el("div", "composer-measure");
   private lastSentSize = "";
@@ -98,6 +100,24 @@ export class TerminalPane {
       });
     }
     this.hostedApps = new HostedApps(session.id);
+    this.images = new ComposerImages(
+      session.id,
+      () => {
+        this.refreshComposer();
+        this.fit();
+      },
+      (text) => this.agent.showError(text),
+    );
+    this.message.addEventListener("paste", (event) => this.images.paste(event));
+    this.message.addEventListener("workspace-paste-image", (event) => {
+      const base64 = (event as CustomEvent<string>).detail;
+      const bytes = Uint8Array.from(atob(base64), (character) =>
+        character.charCodeAt(0),
+      );
+      void this.images.add(
+        new File([bytes], "Screenshot.png", { type: "image/png" }),
+      );
+    });
     this.saveDraft = actions.draft;
     this.message.value = draft;
     this.message.addEventListener("input", () => {
@@ -195,7 +215,16 @@ export class TerminalPane {
       e.preventDefault();
       this.submit();
     };
-    composer.append(this.message, this.send);
+    composer.append(this.images.picker, this.message, this.send);
+    composer.addEventListener("dragover", (event) => {
+      if (event.dataTransfer?.types.includes("Files")) event.preventDefault();
+    });
+    composer.addEventListener("drop", (event) => {
+      if (!event.dataTransfer?.files.length) return;
+      event.preventDefault();
+      for (const file of Array.from(event.dataTransfer.files))
+        void this.images.add(file);
+    });
     this.agent.heading.classList.add("composer-activity");
     this.element.append(
       header,
@@ -203,6 +232,7 @@ export class TerminalPane {
       this.hostedApps.element,
       surface,
       this.agent.heading,
+      this.images.element,
       composer,
     );
     context.hidden = true;
@@ -489,6 +519,7 @@ export class TerminalPane {
   }
   private refreshComposer(): void {
     const chat = this.appearance.view === "agent";
+    if (this.images) this.images.picker.hidden = !chat;
     this.message.setAttribute(
       "aria-label",
       `${chat ? "Message to" : "Command for"} ${this.session.name}`,
@@ -503,6 +534,7 @@ export class TerminalPane {
     if (this.send) {
       this.send.disabled =
         this.sending ||
+        this.images.busy ||
         this.connection.textContent !== "Live" ||
         (chat && !this.activity?.canMessage);
       this.send.setAttribute(
@@ -516,12 +548,21 @@ export class TerminalPane {
   }
   private async submit(): Promise<void> {
     const text = this.message.value;
+    const attachments = this.images.snapshot();
     if (
-      !text.trim() ||
+      (!text.trim() && !attachments.length) ||
+      this.images.busy ||
       this.socket?.readyState !== WebSocket.OPEN ||
       this.sending
     )
       return;
+    if (attachments.length && this.appearance.view !== "agent") {
+      this.agent.showError(
+        "Switch to Agent view to send your attached images to Claude.",
+      );
+      this.setView("agent");
+      return;
+    }
     if (this.appearance.view === "agent") {
       if (!this.activity?.canMessage) {
         this.agent.showError(
@@ -534,11 +575,15 @@ export class TerminalPane {
       this.sending = true;
       this.refreshComposer();
       this.agent.showError("");
-      const pendingId = this.agent.beginMessage(text);
+      const message = this.images.message(text, attachments);
+      const pendingId = this.agent.beginMessage(message);
       try {
         // The server rechecks the foreground process on every chat submission.
-        await api(`/terminals/${this.session.id}/message`, "POST", { text });
+        await api(`/terminals/${this.session.id}/message`, "POST", {
+          text: message,
+        });
         this.agent.finishMessage(pendingId, true);
+        this.images.remove(attachments);
         clearTimeout(this.activityTimer);
         if (!this.activityRequest && this.viewVisible) void this.pollActivity();
       } catch (error) {
@@ -691,6 +736,7 @@ export class TerminalPane {
     else this.terminal.focus();
   }
   dispose(): void {
+    this.images.dispose();
     this.disposed = true;
     this.hostedApps.dispose();
     this.composerMeasure.remove();

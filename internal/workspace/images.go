@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Images are served only from the terminal's checkout. os.Root prevents both
@@ -36,6 +37,14 @@ func (m *Manager) terminalImage(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			http.NotFound(w, r)
 			return
+		}
+		// Only this terminal's uploaded attachments extend the checkout boundary.
+		if m.file != "" {
+			if uploads, resolveErr := filepath.EvalSymlinks(m.imageUploadDir(terminal.ID)); resolveErr == nil {
+				if relative, relErr := filepath.Rel(uploads, path); relErr == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+					rootPath = uploads
+				}
+			}
 		}
 		path, err = filepath.Rel(rootPath, path)
 		if err != nil {
