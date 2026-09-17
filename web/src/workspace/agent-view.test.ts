@@ -206,7 +206,9 @@ it("keeps existing message DOM and reconciles outgoing arrivals without replayin
   const articles = [...view.element.querySelectorAll("article")];
   expect(articles[0]).toBe(original);
   expect(articles[1]).toBe(pending);
-  expect(articles[1].querySelector(".message-delivery")).toBeNull();
+  expect(
+    articles[1].querySelector(".message-delivery")?.getAttribute("aria-hidden"),
+  ).toBe("true");
   expect(articles[2].classList.contains("message-arrival")).toBe(false);
   const lines = articles[2].querySelectorAll<HTMLElement>(
     ".reply-chunk-arrival",

@@ -23,6 +23,7 @@ export class ComposerImages {
   private input = el("input");
   private items: Attachment[] = [];
   private disposed = false;
+  private detached = new Set<Attachment>();
   constructor(
     private terminalId: string,
     private changed: () => void,
@@ -131,6 +132,27 @@ export class ComposerImages {
       this.error(error instanceof Error ? error.message : String(error));
     }
   }
+  detach(items: Attachment[]): void {
+    for (const item of items) {
+      item.card.remove();
+      this.detached.add(item);
+    }
+    this.items = this.items.filter((item) => !items.includes(item));
+    this.update();
+  }
+  restore(items: Attachment[]): void {
+    if (this.disposed) return this.release(items);
+    for (const item of items) this.detached.delete(item);
+    this.items = [...items, ...this.items];
+    this.element.prepend(...items.map((item) => item.card));
+    this.update();
+  }
+  release(items: Attachment[]): void {
+    for (const item of items) {
+      this.detached.delete(item);
+      URL.revokeObjectURL(item.url);
+    }
+  }
   remove(items: Attachment[]): void {
     for (const item of items) {
       item.card.remove();
@@ -146,5 +168,6 @@ export class ComposerImages {
   dispose(): void {
     this.disposed = true;
     this.remove(this.snapshot());
+    this.release([...this.detached]);
   }
 }

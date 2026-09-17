@@ -4197,3 +4197,157 @@ test("busy Claude follow-ups acknowledge once and never cover later replies", as
       .map((m: any) => m.text),
   ).toEqual([first, second]);
 });
+
+test("sending is one smooth entrance with stable geometry through delayed acknowledgement", async ({
+  page,
+  request,
+}, info) => {
+  const folder = join(process.env.CLOOVIES_E2E_ROOT!, "SmoothSending");
+  mkdirSync(folder, { recursive: true });
+  const project = await (
+    await request.post("/api/workspace/projects", {
+      data: { path: folder, name: "Smooth sending" },
+    })
+  ).json();
+  const terminal = await (
+    await request.post("/api/workspace/terminals", {
+      data: {
+        projectId: project.id,
+        path: folder,
+        name: "Smooth send fixture",
+        program: "claude",
+      },
+    })
+  ).json();
+  const activity = {
+    kind: "claude",
+    status: "ready",
+    canMessage: true,
+    tools: 0,
+    truncated: false,
+    messages: Array.from({ length: 8 }, (_, i) => ({
+      id: `history-${i}`,
+      role: "assistant",
+      text: `Earlier reply ${i}. ` + "Readable history. ".repeat(40),
+    })),
+  };
+  await page.route(`**/terminals/${terminal.id}/activity`, (route) =>
+    route.fulfill({ json: activity }),
+  );
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(`**/terminals/${terminal.id}/message`, async (route) => {
+    await gate;
+    await route.fulfill({ json: {} });
+  });
+  try {
+    await page.goto("/");
+    await page
+      .getByRole("button", { name: "Show Smooth send fixture", exact: true })
+      .click();
+    const pane = page.getByRole("region", {
+      name: "Smooth send fixture terminal",
+      exact: true,
+    });
+    const input = pane.locator(".message-input");
+    const content = pane.locator(".agent-content");
+    await expect(content).toContainText("Earlier reply 7");
+    await page.evaluate(() => document.fonts.ready);
+    const prompt =
+      "Please make this interaction feel calm.\n\nOne gentle entrance, with no jump when delivery is confirmed.\nAnd keep the next draft safe.";
+    await input.fill(prompt);
+    await expect
+      .poll(() =>
+        content.evaluate(
+          (el) => el.scrollHeight - el.clientHeight - el.scrollTop,
+        ),
+      )
+      .toBeLessThan(2);
+    await input.evaluate((el) => {
+      el.addEventListener(
+        "keydown",
+        () => {
+          const viewport = el
+            .closest(".terminal-pane")!
+            .querySelector(".agent-content")!;
+          const probe = { samples: [] as any[], starts: 0, active: true };
+          (window as any).__sendMotion = probe;
+          viewport.addEventListener("animationstart", (event) => {
+            if ((event as AnimationEvent).animationName === "message-arrive")
+              probe.starts++;
+          });
+          function frame() {
+            const bubble = viewport.querySelector(
+              ".conversation-message.user",
+            ) as HTMLElement;
+            if (bubble) {
+              const rect = bubble.getBoundingClientRect();
+              probe.samples.push({
+                time: performance.now(),
+                height: rect.height,
+                width: rect.width,
+                input: el.getBoundingClientRect().height,
+                opacity: Number(getComputedStyle(bubble).opacity),
+                top: viewport.scrollTop,
+              });
+            }
+            if (probe.active) requestAnimationFrame(frame);
+          }
+          requestAnimationFrame(frame);
+        },
+        { once: true },
+      );
+    });
+    await input.press("Enter");
+    await expect(input).toHaveValue("");
+    const bubble = content.locator(".conversation-message.user");
+    await expect(bubble).toHaveCount(1);
+    await expect
+      .poll(() => bubble.evaluate((el) => Number(getComputedStyle(el).opacity)))
+      .toBe(1);
+    const before = await bubble.boundingBox();
+    const inputHeight = await input.evaluate((el) => el.clientHeight);
+    await input.fill("My next draft");
+    release();
+    await expect(bubble.locator(".message-delivery")).toHaveText(
+      "Sent to terminal",
+    );
+    activity.messages.push({ id: "receipt", role: "user", text: prompt });
+    await expect(bubble).not.toHaveClass(/pending-message/);
+    await expect(input).toHaveValue("My next draft");
+    expect(await input.evaluate((el) => el.clientHeight)).toBe(inputHeight);
+    const after = await bubble.boundingBox();
+    expect(after!.height).toBe(before!.height);
+    expect(after!.width).toBe(before!.width);
+    const probe = await page.evaluate(() => {
+      const probe = (window as any).__sendMotion;
+      probe.active = false;
+      return probe;
+    });
+    expect(probe.starts).toBe(1);
+    expect(new Set(probe.samples.map((s: any) => s.height)).size).toBe(1);
+    expect(new Set(probe.samples.map((s: any) => s.input)).size).toBe(1);
+    for (let i = 1; i < probe.samples.length; i++) {
+      expect(probe.samples[i].opacity).toBeGreaterThanOrEqual(
+        probe.samples[i - 1].opacity - 0.001,
+      );
+      expect(probe.samples[i].top).toBeGreaterThanOrEqual(
+        probe.samples[i - 1].top - 1,
+      );
+    }
+    await info.attach("send-frame-measurements", {
+      body: JSON.stringify(probe, null, 2),
+      contentType: "application/json",
+    });
+    await page.screenshot({
+      path: info.outputPath("smooth-send-confirmed.png"),
+    });
+  } finally {
+    release();
+    await request.patch(`/api/workspace/terminals/${terminal.id}`, {
+      data: { action: "stop" },
+    });
+  }
+});
