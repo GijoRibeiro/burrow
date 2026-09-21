@@ -35,7 +35,7 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: #292a32;
+  background: color-mix(in srgb, var(--bg) 92%, #000);
 }
 .team-heading {
   position: absolute;
@@ -79,7 +79,7 @@
   overflow: hidden;
   cursor: grab;
   touch-action: none;
-  background-image: radial-gradient(circle, #eae5ce25 1px, transparent 1px);
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--ink) 15%, transparent) 1px, transparent 1px);
   background-size: 24px 24px;
 }
 .team-surface.dragging {
@@ -116,7 +116,7 @@
   animation: team-flow 3s linear infinite;
 }
 .team-wires circle {
-  fill: #292a32;
+  fill: color-mix(in srgb, var(--bg) 92%, #000);
   stroke: #85848a;
   stroke-width: 1.5;
 }
@@ -130,8 +130,8 @@
   left: 0;
   top: 0;
   width: 288px;
-  background: #31323c;
-  border: 1px solid color-mix(in srgb, var(--node-color) 38%, #4b4c55);
+  background: var(--surface, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--node-color) 38%, var(--line));
   border-radius: 12px;
   box-shadow: 0 8px 22px #00000025;
   transition:
@@ -140,14 +140,14 @@
   overflow: hidden;
 }
 .team-node.head {
-  background: color-mix(in srgb, var(--node-color) 7%, #31323c);
+  background: color-mix(in srgb, var(--node-color) 7%, var(--surface, var(--bg)));
   border-top: 3px solid var(--node-color);
 }
 .team-node.selected {
   border-color: var(--node-color);
   outline: 2px solid var(--node-color);
   outline-offset: 3px;
-  background: color-mix(in srgb, var(--node-color) 12%, #31323c);
+  background: color-mix(in srgb, var(--node-color) 12%, var(--surface, var(--bg)));
   box-shadow:
     0 0 0 3px color-mix(in srgb, var(--node-color) 13%, transparent),
     0 12px 26px #0003;
@@ -169,7 +169,7 @@
 }
 .team-node.proposed {
   border-style: dashed;
-  background: #30313aee;
+  background: var(--surface, var(--bg));
   box-shadow: none;
 }
 .team-node-open {
@@ -226,7 +226,7 @@
   color: var(--muted);
 }
 .team-node-footer {
-  border-top: 1px solid #eae5ce12;
+  border-top: 1px solid var(--faint);
   padding: 11px 0;
   display: flex;
   align-items: center;
@@ -261,7 +261,7 @@
   bottom: 36px;
   left: 22px;
   padding: 5px;
-  background: #31323cf5;
+  background: var(--surface, var(--bg));
   border: 1px solid var(--line);
   border-radius: 8px;
   box-shadow: 0 4px 12px #0002;
@@ -502,7 +502,7 @@
   max-width: 145px;
   padding: 8px;
   font-size: 11px;
-  background: #31323c;
+  background: var(--surface, var(--bg));
   border: 1px solid var(--line);
   border-radius: 5px;
 }

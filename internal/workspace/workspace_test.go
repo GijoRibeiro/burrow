@@ -336,3 +336,38 @@ func TestAgentLaunchAndRestartUseYOLO(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeTerminalColorEnvironmentAndRGBTransport(t *testing.T) {
+	requireTmux(t)
+	m := manager(t)
+	// Reproduce a tmux server first launched from an agent/non-interactive host.
+	t.Setenv("NO_COLOR", "1")
+	t.Setenv("FORCE_COLOR", "0")
+	t.Setenv("CLICOLOR", "0")
+	t.Setenv("CI", "true")
+	t.Setenv("COLORTERM", "")
+	t.Setenv("TERM", "dumb")
+	p, err := m.AddProject(repo(t), "Colors")
+	if err != nil {
+		t.Fatal(err)
+	}
+	term, err := m.CreateTerminal(p.ID, p.Path, "Colors")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(m.Handler())
+	defer server.Close()
+	conn := connectTest(t, server, term.ID)
+	defer conn.Close()
+	sendTest(t, conn, "printf 'ENV:%s:%s:%s:%s:%s:%s\\n' \"${NO_COLOR-unset}\" \"${FORCE_COLOR-unset}\" \"${CLICOLOR-unset}\" \"${CI-unset}\" \"$COLORTERM\" \"$TERM\"\r")
+	readUntil(t, conn, "ENV:unset:unset:unset:unset:truecolor:tmux-256color")
+	features, err := m.tmux("list-clients", "-F", "#{client_termfeatures}")
+	if err != nil || !strings.Contains(features, "RGB") {
+		t.Fatalf("truecolor not advertised: %q %v", features, err)
+	}
+	sendTest(t, conn, "printf '\\033[38;2;18;171;203mRGB-%s\\033[0m\\n' 'ok'\r")
+	data := readUntil(t, conn, "RGB-ok")
+	if !strings.Contains(data, "38;2;18;171;203m") {
+		t.Fatalf("RGB color lost through PTY/tmux: %q", data)
+	}
+}

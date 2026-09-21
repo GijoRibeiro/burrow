@@ -993,6 +993,7 @@ body {
   color: var(--bg);
 }
 .brand {
+  justify-content: center;
   height: 76px;
   padding: 0 18px;
   gap: 10px;
@@ -1209,8 +1210,10 @@ textarea {
 }
 .terminal-host {
   position: absolute;
-  inset: 0;
-  padding: 9px 5px 5px 10px;
+  /* FitAddon measures this parent's computed size, including border-box
+     padding. Insets reserve space without counting it as terminal cells. */
+  inset: 10px 10px 14px;
+  padding: 0;
 }
 /* Keep PTY geometry and its parser alive while reading the conversation. */
 .terminal-pane[data-view="agent"] .terminal-host {
@@ -1277,6 +1280,7 @@ textarea {
 :is(.is-thinking, .is-working) .creature-frame,
 .session-creature.working .creature-frame,
 .agent-avatar:hover .creature-frame,
+.brand-symbol .creature-frame,
 .creature-choice:hover .creature-frame {
   animation: var(--sprite-sequence) var(--sprite-duration) steps(1, end)
     infinite;
@@ -2883,7 +2887,7 @@ textarea {
   margin-left: auto;
   margin-right: 0;
   padding: 13px 17px;
-  border-radius: 14px 14px 4px 14px;
+  border-radius: 10px 10px 3px 10px;
   background-color: color-mix(in srgb, var(--terminal-color) 24%, var(--bg));
   transition: background-color 220ms ease-out;
 }
@@ -2902,7 +2906,7 @@ textarea {
   y: 0.5px;
   width: calc(100% - 1px);
   height: calc(100% - 1px);
-  rx: 14px;
+  rx: 10px;
   fill: none;
   stroke: color-mix(in srgb, var(--terminal-color) 50%, var(--line));
   stroke-width: 1px;
@@ -2910,7 +2914,7 @@ textarea {
 }
 .conversation-message.user.pending-message:is(.sending, .sent) {
   background-color: color-mix(in srgb, var(--terminal-color) 8%, var(--bg));
-  border-radius: 14px;
+  border-radius: 10px;
 }
 .conversation-message.user.pending-message:is(.sending, .sent)
   .pending-message-outline {
