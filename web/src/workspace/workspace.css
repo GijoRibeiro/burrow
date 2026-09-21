@@ -2592,11 +2592,11 @@ textarea {
   outline-offset: 3px;
 }
 
-/* Keep long replies comfortable to read in wide panes, and fluid in small ones. */
+/* Agent replies use the available pane width and start at its left edge. */
 .conversation-message {
   width: 100%;
-  max-width: 76ch;
-  margin: 0 auto 28px;
+  max-width: 100%;
+  margin: 0 0 28px;
   font-size: calc(var(--content-font-size, 14px) + 2px);
 }
 .terminal-pane .message-markdown {
@@ -2846,6 +2846,7 @@ textarea {
 }
 .conversation-stack {
   display: flow-root;
+  width: 100%;
 }
 .message-arrival {
   animation: message-arrive 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
@@ -2889,11 +2890,7 @@ textarea {
   }
 }
 
-/* A shared reading column, with outgoing turns unmistakably on the right. */
-.conversation-stack {
-  max-width: 76ch;
-  margin-inline: auto;
-}
+/* Outgoing turns align with the pane's right edge, with room on the left. */
 .conversation-message.user {
   position: relative;
   min-width: min(88%, 16rem);
