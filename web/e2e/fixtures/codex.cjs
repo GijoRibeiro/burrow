@@ -1,4 +1,12 @@
 #!/usr/bin/env node
+if (process.argv.includes('app-server')) {
+  require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
+    const request = JSON.parse(line);
+    if (request.method === 'initialize') process.stdout.write(JSON.stringify({ id: request.id, result: {} }) + '\n');
+    if (request.method === 'account/rateLimits/read') process.stdout.write(JSON.stringify({ id: request.id, result: { rateLimits: { limitId: 'codex', primary: { usedPercent: 9, windowDurationMins: 10080 } } } }) + '\n');
+  });
+  return;
+}
 // Interactive local fixture, with no account or model calls.
 if (!process.argv.includes('--dangerously-bypass-approvals-and-sandbox')) process.exit(2);
 const fs = require('node:fs'), path = require('node:path');

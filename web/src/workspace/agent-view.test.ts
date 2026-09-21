@@ -189,6 +189,8 @@ it("keeps existing message DOM and reconciles outgoing arrivals without replayin
   const id = view.beginMessage("New question");
   const pending = view.element.querySelector(".pending-message")!;
   expect(pending.classList.contains("message-arrival")).toBe(true);
+  const body = pending.querySelector(".message-markdown");
+  expect(body).not.toBeNull();
   view.finishMessage(id, true);
   expect(view.element.querySelector(".pending-message")).toBe(pending);
   view.setActivity({
@@ -206,6 +208,12 @@ it("keeps existing message DOM and reconciles outgoing arrivals without replayin
   const articles = [...view.element.querySelectorAll("article")];
   expect(articles[0]).toBe(original);
   expect(articles[1]).toBe(pending);
+  expect(articles[1].querySelector(".message-markdown")).toBe(body);
+  expect(articles[1].classList.contains("delivery-settling")).toBe(true);
+  const end = new Event("animationend", { bubbles: true });
+  Object.defineProperty(end, "animationName", { value: "message-arrive" });
+  articles[1].dispatchEvent(end);
+  expect(articles[1].classList.contains("delivery-settling")).toBe(false);
   expect(
     articles[1].querySelector(".message-delivery")?.getAttribute("aria-hidden"),
   ).toBe("true");

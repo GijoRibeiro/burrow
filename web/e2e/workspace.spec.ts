@@ -5048,3 +5048,282 @@ test("settings preview and persist backgrounds while native terminal fits inside
   await settings.getByRole("button", { name: "Reset background" }).click();
   await expect(settings.getByLabel("Background hex color")).toHaveValue("#2e2f38");
 });
+
+test("account meters show Astra and Fable remaining allowance without footer clutter", async ({
+  page,
+}, info) => {
+  await page.route("**/api/workspace/usage", (route) =>
+    route.fulfill({
+      json: {
+        models: [
+          {
+            provider: "openai",
+            model: "Astra",
+            status: "ready",
+            shared: true,
+            windows: [
+              {
+                label: "Codex · Weekly",
+                used: 9,
+                resetsAt: "2026-09-28T12:00:00Z",
+              },
+            ],
+          },
+          {
+            provider: "anthropic",
+            model: "Fable",
+            status: "ready",
+            shared: false,
+            windows: [
+              { label: "5-hour", used: 9 },
+              { label: "Weekly · all models", used: 63 },
+              {
+                label: "Fable · weekly",
+                used: 100,
+                resetsAt: "2026-09-22T12:00:00Z",
+              },
+            ],
+          },
+        ],
+        checkedAt: "2026-09-21T12:00:00Z",
+      },
+    }),
+  );
+  await page.goto("/");
+  const meters = page.locator(".usage-meters");
+  await expect(meters.locator(".usage-value")).toHaveText([
+    "91% left",
+    "0% left",
+  ]);
+  await expect(meters.getByRole("meter")).toHaveCount(2);
+  await expect(
+    meters.getByRole("img", { name: "GPT", exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Fable usage: 0% remaining", exact: true })
+    .click();
+  await expect(page.locator("#usage-anthropic-detail")).toBeVisible();
+  await expect(page.locator("#usage-anthropic-detail")).toContainText(
+    "Fable · weekly",
+  );
+  await expect(meters).not.toContainText("Opus");
+  await page.screenshot({
+    path: info.outputPath("account-meters-desktop.png"),
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(meters).toBeVisible();
+  expect(
+    await meters.evaluate((el) => el.getBoundingClientRect().right),
+  ).toBeLessThanOrEqual(390);
+  const popup = await page.locator("#usage-anthropic-detail").boundingBox();
+  expect(popup!.x).toBeGreaterThanOrEqual(0);
+  expect(popup!.x + popup!.width).toBeLessThanOrEqual(390);
+  await page.screenshot({ path: info.outputPath("account-meters-small.png") });
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#usage-anthropic-detail")).toBeHidden();
+  await page.getByRole("button", { name: "Fable usage: 0% remaining", exact: true }).press("Enter");
+  await expect(page.locator("#usage-anthropic-detail")).toBeVisible();
+  await page.getByRole("button", { name: "Fable usage: 0% remaining", exact: true }).press("Enter");
+  await expect(page.locator("#usage-anthropic-detail")).toBeHidden();
+});
+
+test("branch PR link stays available in chat and terminal views", async ({
+  page,
+  request,
+}) => {
+  const folder = join(process.env.CLOOVIES_E2E_ROOT!, "PRLink");
+  mkdirSync(folder, { recursive: true });
+  const project = await (
+    await request.post("/api/workspace/projects", {
+      data: { path: folder, name: "PR link" },
+    })
+  ).json();
+  const terminal = await (
+    await request.post("/api/workspace/terminals", {
+      data: {
+        projectId: project.id,
+        path: folder,
+        name: "PR fixture",
+        program: "claude",
+      },
+    })
+  ).json();
+  await page.route(`**/terminals/${terminal.id}/pull-request`, (route) =>
+    route.fulfill({
+      json: {
+        number: 42,
+        url: "https://github.com/example/project/pull/42",
+        title: "Improve checkout",
+        isDraft: true,
+      },
+    }),
+  );
+  try {
+    await page.goto("/");
+    await page
+      .getByRole("button", { name: "Show PR fixture", exact: true })
+      .click();
+    const pane = page.getByRole("region", {
+      name: "PR fixture terminal",
+      exact: true,
+    });
+    const link = pane.getByRole("link", {
+      name: "Open draft pull request #42: Improve checkout",
+    });
+    await expect(link).toBeVisible();
+    await expect(link).toHaveAttribute(
+      "href",
+      "https://github.com/example/project/pull/42",
+    );
+    await expect(link).toHaveAttribute("target", "_blank");
+    await setPaneView(pane, "terminal");
+    await expect(link).toBeVisible();
+    await setPaneView(pane, "agent");
+    await expect(link).toBeVisible();
+  } finally {
+    await request.patch(`/api/workspace/terminals/${terminal.id}`, {
+      data: { action: "stop" },
+    });
+  }
+});
+
+test("fast receipts preserve one stationary message entrance and its formatted body", async ({
+  page,
+  request,
+}, info) => {
+  const folder = join(process.env.CLOOVIES_E2E_ROOT!, "FastReceipt");
+  mkdirSync(folder, { recursive: true });
+  const project = await (
+    await request.post("/api/workspace/projects", {
+      data: { path: folder, name: "Fast receipt" },
+    })
+  ).json();
+  const terminal = await (
+    await request.post("/api/workspace/terminals", {
+      data: {
+        projectId: project.id,
+        path: folder,
+        name: "Fast receipt fixture",
+        program: "claude",
+      },
+    })
+  ).json();
+  const activity = {
+    kind: "claude",
+    status: "ready",
+    canMessage: true,
+    tools: 0,
+    truncated: false,
+    messages: Array.from({ length: 8 }, (_, i) => ({
+      id: `history-${i}`,
+      role: "assistant",
+      text: `Earlier reply ${i}. ` + "A long history. ".repeat(45),
+    })),
+  };
+  await page.route(`**/terminals/${terminal.id}/activity`, (route) =>
+    route.fulfill({ json: activity }),
+  );
+  await page.route(`**/terminals/${terminal.id}/message`, async (route) => {
+    activity.messages.push({
+      id: "fast-receipt",
+      role: "user",
+      text: route.request().postDataJSON().text.trim(),
+    });
+    await route.fulfill({ json: {} });
+  });
+  try {
+    await page.goto("/");
+    await page
+      .getByRole("button", { name: "Show Fast receipt fixture", exact: true })
+      .click();
+    const pane = page.getByRole("region", {
+      name: "Fast receipt fixture terminal",
+      exact: true,
+    });
+    const input = pane.locator(".message-input");
+    await expect(pane.locator(".agent-content")).toContainText(
+      "Earlier reply 7",
+    );
+    await page.evaluate(() => document.fonts.ready);
+    await input.fill(
+      "A quick confirmation should not restart **this message**.\n\nOr move it while it fades in.",
+    );
+    await expect
+      .poll(() =>
+        pane
+          .locator(".agent-content")
+          .evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop),
+      )
+      .toBeLessThan(2);
+    await input.evaluate((el) => {
+      el.addEventListener(
+        "keydown",
+        () => {
+          const viewport = el
+            .closest(".terminal-pane")!
+            .querySelector(".agent-content")!;
+          const probe = {
+            samples: [] as any[],
+            starts: 0,
+            active: true,
+            sameBody: true,
+            sawSettling: false,
+          };
+          (window as any).__fastReceipt = probe;
+          let original: Element | null = null;
+          viewport.addEventListener("animationstart", (event) => {
+            if ((event as AnimationEvent).animationName === "message-arrive")
+              probe.starts++;
+          });
+          function frame() {
+            const bubble = viewport.querySelector(
+              ".conversation-message.user",
+            ) as HTMLElement;
+            if (bubble) {
+              const body = bubble.querySelector(".message-markdown");
+              original ||= body;
+              probe.sameBody &&= original === body;
+              probe.sawSettling ||=
+                bubble.classList.contains("delivery-settling");
+              probe.samples.push({
+                y: bubble.getBoundingClientRect().y,
+                top: viewport.scrollTop,
+                opacity: Number(getComputedStyle(bubble).opacity),
+              });
+            }
+            if (probe.active) requestAnimationFrame(frame);
+          }
+          requestAnimationFrame(frame);
+        },
+        { once: true },
+      );
+    });
+    await input.press("Enter");
+    const bubble = pane.locator(".conversation-message.user");
+    await expect(bubble).toHaveCount(1);
+    await expect(bubble).not.toHaveClass(/pending-message/);
+    await expect(bubble).not.toHaveClass(/message-arrival/);
+    const probe = await page.evaluate(() => {
+      const p = (window as any).__fastReceipt;
+      p.active = false;
+      return p;
+    });
+    expect(probe.sameBody).toBe(true);
+    expect(probe.starts).toBe(1);
+    expect(probe.sawSettling).toBe(true);
+    const ys = probe.samples.map((s: any) => s.y);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeLessThan(1);
+    for (let i = 1; i < probe.samples.length; i++)
+      expect(probe.samples[i].opacity).toBeGreaterThanOrEqual(
+        probe.samples[i - 1].opacity - 0.001,
+      );
+    await info.attach("fast-receipt-frames", {
+      body: JSON.stringify(probe, null, 2),
+      contentType: "application/json",
+    });
+  } finally {
+    await request.patch(`/api/workspace/terminals/${terminal.id}`, {
+      data: { action: "stop" },
+    });
+  }
+});

@@ -1,3 +1,4 @@
+import { PullRequestLink } from "./pull-request";
 import { terminalTheme } from "./theme";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -37,6 +38,7 @@ export class TerminalPane {
   readonly element = el("section", "terminal-pane");
   private terminal: Terminal;
   private hostedApps: HostedApps;
+  private pullRequest: PullRequestLink;
   private host = el("div", "terminal-host");
   private agent: AgentView;
   private appearance: PaneAppearance;
@@ -104,6 +106,7 @@ export class TerminalPane {
       });
     }
     this.hostedApps = new HostedApps(session.id);
+    this.pullRequest = new PullRequestLink(session.id);
     this.images = new ComposerImages(
       session.id,
       () => {
@@ -172,7 +175,7 @@ export class TerminalPane {
       button("Hide terminal", actions.hide, "icon-button", "×"),
     );
     controls.prepend(this.hostedApps.toggle);
-    header.append(identity, controls);
+    header.append(identity, this.pullRequest.element, controls);
     const context = el("div", "pane-context");
     const tree = project.worktrees.find((w) => w.path === session.path);
     this.connection.hidden = true;
@@ -440,6 +443,7 @@ export class TerminalPane {
     if (this.viewVisible === visible) return;
     this.viewVisible = visible;
     this.hostedApps.setVisible(visible);
+    this.pullRequest.setVisible(visible);
     this.agent.setVisible(visible);
     clearTimeout(this.activityTimer);
     if (visible && !this.activityRequest) void this.pollActivity();
@@ -890,6 +894,7 @@ export class TerminalPane {
     this.images.dispose();
     this.disposed = true;
     this.hostedApps.dispose();
+    this.pullRequest.dispose();
     this.composerMeasure.remove();
     this.agent.dispose();
     clearTimeout(this.timer);
