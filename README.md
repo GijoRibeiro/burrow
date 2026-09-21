@@ -174,6 +174,13 @@ Slack write-tool denials. They do not send Slack replies or create tickets.
 - Closing or restarting Cloovies preserves shells. Quitting stops the app’s HTTP
   server, so head coordination tools and scheduled scans resume when the app
   reopens; the underlying agents and terminals keep running. Rebooting the computer ends processes; the saved sessions can then be started again.
+- **Keep awake** is on by default in the Mac app. Toggle it at the bottom of the
+  sidebar or in the app menu; your choice is remembered. It prevents idle system
+  sleep while Cloovies is running, including with a locked or sleeping display
+  and a closed app window. Quitting releases it. It does not prevent deliberate
+  Sleep, laptop lid sleep, low-battery sleep, shutdown, or reboot. This is a native
+  macOS power assertion, not a change to your system settings. Browser-only use
+  does not keep the Mac awake.
 - The server listens only on loopback. Workspace requests require a local host and same-origin requests; mutations require JSON.
 - The native app uses port 4340. Its log is `~/Library/Logs/Cloovies/workspace.log`. `CLOOVIES_NATIVE_PORT` can select a different native port.
 - Tests use separate folders and tmux sockets. For another isolated instance, set both `CLOOVIES_WORKSPACE_DIR` and `CLOOVIES_TMUX_SOCKET`.
@@ -188,6 +195,7 @@ The new implementation lives in `internal/workspace`, `web/src/workspace`, `cmd/
 go test ./...
 go test -race ./internal/workspace
 python3 scripts/test-workspace-installer.py
+./scripts/test-keep-awake.sh # macOS power assertion lifecycle
 cd web
 npm ci
 npm run build

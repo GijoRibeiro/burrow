@@ -11,6 +11,7 @@ import {
   type CoordinationContext,
 } from "./coordination";
 import { nativeHandler, setupDialog } from "./setup";
+import { keepAwakeControl } from "./keep-awake";
 import { worktreeDialog, issuePrompt } from "./worktree-dialog";
 import "./workspace.css";
 import { captureLayout } from "./motion";
@@ -169,6 +170,7 @@ class WorkspaceApp {
       ),
       productInboxButton(),
       button("Setup and tools", setupDialog, "subtle"),
+      keepAwakeControl(),
     );
     this.sidebar.append(
       brand,

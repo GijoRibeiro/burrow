@@ -21,6 +21,8 @@ final class WorkspaceApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
     private var window: NSWindow!
     private var web: WKWebView!
     private var daemon: Process?
+    private let keepAwake = KeepAwakeController()
+    private var keepAwakeMenu: NSMenuItem!
     private let dragOverlay = WindowDragOverlay(frame: .zero)
     private let port = Int(ProcessInfo.processInfo.environment["CLOOVIES_NATIVE_PORT"] ?? "4340") ?? 4340
     private lazy var baseURL = URL(string: "http://127.0.0.1:\(port)")!
@@ -33,7 +35,13 @@ final class WorkspaceApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
         }
         NSApp.setActivationPolicy(.regular)
         let main = NSMenu()
-        let appMenu = NSMenu(); appMenu.addItem(withTitle: "Quit Cloovies", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let appMenu = NSMenu()
+        keepAwakeMenu = NSMenuItem(title: "Keep Mac Awake", action: #selector(toggleKeepAwake), keyEquivalent: "")
+        keepAwakeMenu.target = self
+        keepAwakeMenu.toolTip = "Keep agents running while the screen is locked. Ends when you quit; closing the lid or choosing Sleep can still suspend the Mac."
+        keepAwakeMenu.state = keepAwake.active ? .on : .off
+        appMenu.addItem(keepAwakeMenu); appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Quit Cloovies", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         let appItem = NSMenuItem(); appItem.submenu = appMenu; main.addItem(appItem)
         let windowMenu = NSMenu(title: "Window")
         windowMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
@@ -63,6 +71,7 @@ final class WorkspaceApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
         config.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "chooseFolder")
         config.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "windowDrag")
         config.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "installTools")
+        config.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "keepAwake")
         web = WKWebView(frame: .zero, configuration: config)
         web.navigationDelegate = self; web.uiDelegate = self
         web.setValue(false, forKey: "drawsBackground")
@@ -154,11 +163,30 @@ final class WorkspaceApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
         guard let command = sender.representedObject as? String else { return }
         web.callAsyncJavaScript("window.clooviesCommand?.(command)", arguments: ["command": command], in: nil, in: .page, completionHandler: nil)
     }
+    private func publishKeepAwake() {
+        keepAwakeMenu.state = keepAwake.active ? .on : .off
+        web?.callAsyncJavaScript("window.dispatchEvent(new CustomEvent('workspace-keep-awake', {detail: state}))", arguments: ["state": keepAwake.state], in: nil, in: .page, completionHandler: nil)
+    }
+    @objc private func toggleKeepAwake() {
+        keepAwake.setEnabled(!keepAwake.active)
+        publishKeepAwake()
+        if let error = keepAwake.error {
+            let alert = NSAlert(); alert.messageText = "Keep awake"; alert.informativeText = error
+            alert.beginSheetModal(for: window)
+        }
+    }
     @objc private func reload() { web.load(URLRequest(url: baseURL)) }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { window.makeKeyAndOrderFront(nil); return true }
-    func applicationWillTerminate(_ notification: Notification) { if daemon?.isRunning == true { daemon?.terminate() } }
+    func applicationWillTerminate(_ notification: Notification) { keepAwake.release(); if daemon?.isRunning == true { daemon?.terminate() } }
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage, replyHandler: @escaping (Any?, String?) -> Void) {
         guard message.frameInfo.isMainFrame, message.frameInfo.request.url?.host == baseURL.host, message.frameInfo.request.url?.port == baseURL.port else { replyHandler(nil, "Unsupported origin"); return }
+        if message.name == "keepAwake" {
+            guard let body = message.body as? [String: Any], let action = body["action"] as? String else { replyHandler(nil, "Invalid Keep awake request"); return }
+            if action == "set", let enabled = body["enabled"] as? Bool {
+                keepAwake.setEnabled(enabled); publishKeepAwake()
+            } else if action != "get" { replyHandler(nil, "Invalid Keep awake action"); return }
+            replyHandler(keepAwake.state, nil); return
+        }
         if message.name == "windowDrag" {
             guard let body = message.body as? [String: Any] else { replyHandler(nil, "Invalid drag regions"); return }
             func rectangles(_ key: String) -> [NSRect] {
@@ -205,5 +233,12 @@ final class WorkspaceApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
     }
 
 }
-let application = NSApplication.shared
-let delegate = WorkspaceApp(); application.delegate = delegate; application.run()
+@main
+struct WorkspaceMain {
+    static func main() {
+        let application = NSApplication.shared
+        let delegate = WorkspaceApp()
+        application.delegate = delegate
+        withExtendedLifetime(delegate) { application.run() }
+    }
+}

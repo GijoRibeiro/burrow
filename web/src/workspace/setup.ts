@@ -10,11 +10,11 @@ type SetupStatus = {
   claude: boolean;
   codex: boolean;
 };
-type NativeBridge = { postMessage(value: unknown): Promise<string> };
-export function nativeHandler(name: string): NativeBridge | undefined {
+type NativeBridge<T> = { postMessage(value: unknown): Promise<T> };
+export function nativeHandler<T = string>(name: string): NativeBridge<T> | undefined {
   return (
     window as unknown as {
-      webkit?: { messageHandlers?: Record<string, NativeBridge> };
+      webkit?: { messageHandlers?: Record<string, NativeBridge<T>> };
     }
   ).webkit?.messageHandlers?.[name];
 }
