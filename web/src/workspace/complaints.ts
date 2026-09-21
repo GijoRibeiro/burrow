@@ -52,15 +52,18 @@ export function complaintsInbox(): void {
   const d = el("dialog", "dialog complaints-dialog");
   d.setAttribute("aria-label", "Product complaints inbox");
   const heading = el("div", "complaints-heading");
-  heading.append(
-    el("h2", "", "Product inbox"),
-    button("Close product inbox", () => d.close(), "icon-button", "×"),
-  );
-  const intro = el(
-    "p",
-    "dialog-description",
-    "Catch product bugs and UI/UX complaints from Slack, with the original message beside every finding.",
-  );
+  const title = el("div", "complaints-title");
+  title.append(el("h2", "", "Product inbox"), el("p", "", "Product feedback from Slack"));
+  const settings = el("section", "complaints-settings");
+  settings.id = "complaints-scan-settings";
+  settings.hidden = true;
+  settings.setAttribute("aria-label", "Scan settings");
+  const settingsButton = button("Scan settings", () => {
+    settings.hidden = !settings.hidden;
+    settingsButton.setAttribute("aria-expanded", String(!settings.hidden));
+  }, "complaints-settings-button", "Scan settings");
+  settingsButton.setAttribute("aria-expanded", "false");
+  settingsButton.setAttribute("aria-controls", settings.id);
   const channels = el("input");
   channels.setAttribute("aria-label", "Slack channels");
   channels.placeholder = "product-questions, kyc-cc";
@@ -96,7 +99,8 @@ export function complaintsInbox(): void {
   let state: InboxState | undefined,
     loading = false,
     initialized = false,
-    signature = "";
+    signature = "",
+    expandedID = "";
   const actions = el("div", "complaints-actions");
   const save = async () => {
     await api("/complaints/settings", "POST", {
@@ -111,12 +115,17 @@ export function complaintsInbox(): void {
         await save();
         await api("/complaints/scan", "POST");
       }),
-    "primary",
+    "secondary",
     "Scan now",
   );
   const saveButton = button(
     "Save Slack scan settings",
-    () => act(save),
+    () => act(async () => {
+      await save();
+      settings.hidden = true;
+      settingsButton.setAttribute("aria-expanded", "false");
+      settingsButton.focus();
+    }),
     "secondary",
     "Save settings",
   );
@@ -134,11 +143,18 @@ export function complaintsInbox(): void {
   connect.href = "https://claude.ai/settings/connectors";
   connect.target = "_blank";
   connect.rel = "noopener noreferrer";
-  actions.append(run, saveButton, cancel, connect);
+  actions.append(run, cancel, settingsButton,
+    button("Close product inbox", () => d.close(), "icon-button", "×"));
+  heading.append(title, actions);
+  const settingsActions = el("div", "complaints-settings-actions");
+  settingsActions.append(connect, saveButton);
+  const scanSummary = el("p", "complaints-scan-summary");
+  details.append(scanSummary);
+  settings.append(scope, schedule, details, settingsActions);
   const filters = el("div", "complaints-filters");
   const search = el("input");
   search.type = "search";
-  search.placeholder = "Search findings…";
+  search.placeholder = "Search feedback…";
   search.setAttribute("aria-label", "Search product complaints");
   const area = el("select");
   area.setAttribute("aria-label", "Product area");
@@ -171,6 +187,10 @@ export function complaintsInbox(): void {
   filters.append(search, area, review);
   const list = el("div", "complaints-list");
   list.setAttribute("aria-label", "Slack findings");
+  list.tabIndex = -1;
+  const count = el("span", "complaints-count");
+  const footer = el("div", "complaints-footer");
+  footer.append(count, status);
   function render() {
     if (!state) return;
     const findings = state.findings
@@ -183,7 +203,9 @@ export function complaintsInbox(): void {
             .includes(search.value.toLowerCase()),
       )
       .sort((a, b) => Date.parse(b.foundAt) - Date.parse(a.foundAt));
+    const scrollTop = list.scrollTop;
     list.replaceChildren();
+    count.textContent = `${findings.length} ${review.value === "all" ? "" : `${review.value} `}${findings.length === 1 ? "finding" : "findings"}`;
     if (!findings.length) {
       list.append(
         el(
@@ -201,16 +223,26 @@ export function complaintsInbox(): void {
       return;
     }
     for (const f of findings) {
-      const card = el("article", "complaint-card");
+      const card = el("details", "complaint-card");
       card.dataset.findingId = f.id;
+      card.dataset.status = f.status;
+      card.open = expandedID === f.id;
+      const row = el("summary", "complaint-row");
+      const dot = el("span", "complaint-unread");
+      dot.setAttribute("aria-hidden", "true");
+      const copy = el("div", "complaint-row-copy");
+      copy.append(el("h3", "", f.title));
       const meta = el("div", "complaint-meta");
       meta.append(
-        el("span", "badge", f.area),
+        el("span", "", f.area),
         el("span", "", `#${f.channel.replace(/^#/, "")}`),
       );
       const date = new Date(f.reportedAt || f.foundAt);
       if (!Number.isNaN(date.valueOf()))
-        meta.append(el("time", "", date.toLocaleDateString()));
+        meta.append(el("time", "", date.toLocaleDateString(undefined, { month: "short", day: "numeric" })));
+      copy.append(meta);
+      row.append(dot, copy, el("span", "complaint-chevron", "›"));
+      const body = el("div", "complaint-body");
       const link = el("a", "complaint-source", "Open Slack thread ↗");
       link.href = f.url;
       link.target = "_blank";
@@ -243,15 +275,21 @@ export function complaintsInbox(): void {
         controls.append(
           button(`Reopen ${f.title}`, () => set("new"), "subtle", "Mark new"),
         );
-      card.append(
-        meta,
-        el("h3", "", f.title),
-        el("p", "", f.summary),
-        el("blockquote", "", f.quote),
-        controls,
-      );
+      body.append(el("p", "complaint-description", f.summary));
+      if (f.quote) body.append(el("blockquote", "", f.quote));
+      body.append(controls);
+      card.append(row, body);
+      card.addEventListener("toggle", () => {
+        if (card.open) {
+          expandedID = f.id;
+          for (const other of list.querySelectorAll<HTMLDetailsElement>(".complaint-card[open]")) {
+            if (other !== card) other.open = false;
+          }
+        } else if (expandedID === f.id) expandedID = "";
+      });
       list.append(card);
     }
+    list.scrollTop = scrollTop;
   }
   async function refresh() {
     if (loading || !d.isConnected) return;
@@ -271,8 +309,13 @@ export function complaintsInbox(): void {
           ? new Date(state.lastSuccess).toLocaleString()
           : "Not scanned yet";
       status.textContent = state.running
-        ? "Scanning Slack… You can close this inbox while it runs."
-        : `${state.findings.filter((f) => f.status === "new").length} new · Last successful scan: ${last}${state.summary ? ` · ${state.summary}` : ""}`;
+        ? "Scanning Slack…"
+        : last === "Not scanned yet" ? last : `Last scanned ${last}`;
+      status.title = state.running ? "You can close this inbox while the scan runs." : "";
+      scanSummary.textContent = state.summary;
+      settingsButton.classList.toggle("is-scheduled", state.settings.enabled);
+      settingsButton.title = state.settings.enabled ? "Scan settings · Hourly scans on" : "Scan settings";
+      run.textContent = state.running ? "Scanning…" : "Scan now";
       const next = JSON.stringify([
         state.findings,
         state.running,
@@ -300,18 +343,7 @@ export function complaintsInbox(): void {
   }
   for (const field of [search, area, review])
     field.addEventListener("input", render);
-  d.append(
-    heading,
-    intro,
-    scope,
-    schedule,
-    details,
-    actions,
-    error,
-    status,
-    filters,
-    list,
-  );
+  d.append(heading, settings, error, filters, list, footer);
   document.body.append(d);
   d.showModal();
   void refresh();

@@ -3193,9 +3193,8 @@ test("Slack product inbox scans on demand and preserves review controls", async 
     name: "Product complaints inbox",
     exact: true,
   });
-  await expect(
-    dialog.getByRole("checkbox", { name: "Scan Slack hourly" }),
-  ).not.toBeChecked();
+  await expect(dialog.getByLabel("Slack channels")).not.toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Scan settings", exact: true })).toHaveAttribute("aria-expanded", "false");
   await dialog
     .getByRole("button", { name: "Scan Slack now", exact: true })
     .click();
@@ -3211,18 +3210,26 @@ test("Slack product inbox scans on demand and preserves review controls", async 
     summary: "Searched the chosen channels.",
   };
   await expect(dialog.locator(".complaint-card")).toHaveCount(1);
+  await expect(dialog.locator(".complaint-body")).not.toBeVisible();
+  await dialog.locator(".complaint-row").click();
+  await expect(dialog.locator(".complaint-body")).toBeVisible();
   await expect(
     dialog.getByRole("link", { name: "Open Slack thread" }),
   ).toHaveAttribute("href", finding.url);
   await dialog.evaluate((el) => (el.scrollTop = 0));
-  await expect(dialog).toHaveCSS("width", "940px");
+  await expect(dialog).toHaveCSS("width", "820px");
   await page.screenshot({ path: info.outputPath("product-inbox.png") });
+  await page.setViewportSize({ width: 520, height: 820 });
+  await expect.poll(() => dialog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await page.screenshot({ path: info.outputPath("product-inbox-narrow.png") });
+  await page.setViewportSize({ width: 1512, height: 982 });
   await dialog
     .getByRole("button", { name: "Mark Mobile document clipped reviewed" })
     .click();
   await expect(dialog.locator(".complaint-card")).toHaveCount(0);
   await dialog.getByLabel("Finding status").selectOption("reviewed");
   await expect(dialog.locator(".complaint-card")).toHaveCount(1);
+  await dialog.getByRole("button", { name: "Scan settings", exact: true }).click();
   await dialog.getByLabel("Slack channels").fill("product-questions, finance");
   await dialog.getByLabel("Scan Slack hourly").check();
   await dialog
@@ -3235,6 +3242,7 @@ test("Slack product inbox scans on demand and preserves review controls", async 
   await page
     .getByRole("button", { name: "Product complaints inbox", exact: true })
     .click();
+  await dialog.getByRole("button", { name: "Scan settings", exact: true }).click();
   await expect(dialog.getByLabel("Scan Slack hourly")).toBeChecked();
   await expect(dialog.getByLabel("Slack channels")).toHaveValue(
     "product-questions, finance",
