@@ -4370,6 +4370,7 @@ test("sending is one smooth entrance with stable geometry through delayed acknow
     await expect(bubble.locator(".message-delivery")).toHaveText(
       "Sent to terminal",
     );
+    await page.screenshot({ path: info.outputPath("smooth-send-awaiting-agent.png") });
     activity.messages.push({ id: "receipt", role: "user", text: prompt });
     await expect(bubble).not.toHaveClass(/pending-message/);
     await expect(input).toHaveValue("My next draft");

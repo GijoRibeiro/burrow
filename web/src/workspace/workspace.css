@@ -2880,7 +2880,28 @@ textarea {
   margin-right: 0;
   padding: 13px 17px;
   border-radius: 14px 14px 4px 14px;
-  background: color-mix(in srgb, var(--terminal-color) 24%, var(--bg));
+  background-color: color-mix(in srgb, var(--terminal-color) 24%, var(--bg));
+  transition: background-color 220ms ease-out;
+}
+/* Paint the waiting outline without changing bubble dimensions on acknowledgement. */
+.conversation-message.user::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px dashed color-mix(in srgb, var(--terminal-color) 50%, var(--line));
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 220ms ease-out;
+}
+.conversation-message.user.pending-message:is(.sending, .sent) {
+  background-color: color-mix(in srgb, var(--terminal-color) 8%, var(--bg));
+}
+.conversation-message.user.pending-message:is(.sending, .sent)::before {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .conversation-message.user, .conversation-message.user::before { transition: none; }
 }
 .conversation-message.user .message-role {
   color: var(--ink);
