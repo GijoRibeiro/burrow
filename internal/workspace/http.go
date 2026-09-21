@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -98,7 +99,22 @@ func (m *Manager) Handler() http.Handler {
 		respond(w, nil, m.SendMessage(r.PathValue("id"), v.Text))
 	})
 	mux.HandleFunc("GET /api/workspace/terminals/{id}/activity", func(w http.ResponseWriter, r *http.Request) {
-		activity, err := m.Activity(r.PathValue("id"))
+		query := conversationQuery{Limit: conversationPageSize, Session: r.URL.Query().Get("session")}
+		for name, target := range map[string]**int{"before": &query.Before, "after": &query.After} {
+			if raw := r.URL.Query().Get(name); raw != "" {
+				value, err := strconv.Atoi(raw)
+				if err != nil || value < 0 {
+					http.Error(w, "invalid history cursor", http.StatusBadRequest)
+					return
+				}
+				*target = &value
+			}
+		}
+		if query.Before != nil && query.After != nil {
+			http.Error(w, "choose one history cursor", http.StatusBadRequest)
+			return
+		}
+		activity, err := m.activity(r.PathValue("id"), query)
 		respond(w, activity, err)
 	})
 	mux.HandleFunc("GET /api/workspace/terminals/{id}/connect", m.connect)

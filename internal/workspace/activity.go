@@ -13,9 +13,16 @@ import (
 
 // Activity is a read-only companion to the PTY. Only human-facing conversation
 // text is returned; tool payloads and reasoning stay out of the quiet view.
+type ConversationPage struct {
+	Session string `json:"session"`
+	Start   int    `json:"start"`
+	End     int    `json:"end"`
+	Total   int    `json:"total"`
+}
 type Activity struct {
-	ProcessStatus string `json:"processStatus,omitempty"`
-	CanMessage    bool   `json:"canMessage"`
+	History       *ConversationPage `json:"history,omitempty"`
+	ProcessStatus string            `json:"processStatus,omitempty"`
+	CanMessage    bool              `json:"canMessage"`
 	paneID        string
 	Kind          string                `json:"kind"`
 	Status        string                `json:"status"`
@@ -40,7 +47,24 @@ type claudeSession struct {
 var sessionIDPattern = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)
 
 func (m *Manager) Activity(id string) (Activity, error) {
-	a := Activity{Kind: "shell", Status: "ready", Messages: []ConversationMessage{}}
+	return m.activity(id, conversationQuery{Limit: conversationPageSize})
+}
+func (m *Manager) activity(id string, query conversationQuery) (a Activity, err error) {
+	// Once a transcript is identified, history remains readable if the process
+	// exits or its session metadata is briefly unavailable. Never infer a log
+	// from another agent merely because it has the same checkout.
+	defer func() {
+		if err != nil || a.History != nil || a.Kind != "claude" {
+			return
+		}
+		if _, ok := m.conversations.Load(id); ok {
+			if history, readErr := m.readConversationPage(id, "", query); readErr == nil {
+				a.Messages = history.Messages
+				a.History = history.History
+			}
+		}
+	}()
+	a = Activity{Kind: "shell", Status: "ready", Messages: []ConversationMessage{}}
 	t, err := m.Terminal(id)
 	if err != nil {
 		return a, err
@@ -128,7 +152,7 @@ func (m *Manager) Activity(id string) (Activity, error) {
 	a.CanMessage = foreground
 	a.paneID = fields[2]
 	path := transcriptPath(config, session.Cwd, session.SessionID)
-	conversation, err := m.readConversation(t.ID, path)
+	conversation, err := m.readConversationPage(t.ID, path, query)
 	if err != nil {
 		a.Status = "unavailable"
 		applySessionStatus(&a, session.Status)
@@ -195,6 +219,7 @@ func transcriptPath(config, cwd, session string) string {
 type conversationLog struct {
 	activity Activity
 	seen     map[string]int
+	emit     func(ConversationMessage, int)
 }
 
 func newConversationLog() conversationLog {
@@ -304,13 +329,19 @@ func (c *conversationLog) consume(line []byte) {
 	}
 	key := entry.UUID
 	if key == "" {
-		key = strconv.Itoa(len(a.Messages))
+		key = strconv.Itoa(len(c.seen))
 	}
 	msg := ConversationMessage{ID: key, Role: entry.Type, Text: text}
-	if index, ok := c.seen[key]; ok {
+	index, exists := c.seen[key]
+	if !exists {
+		index = len(c.seen)
+		c.seen[key] = index
+	}
+	if c.emit != nil {
+		c.emit(msg, index)
+	} else if exists {
 		a.Messages[index] = msg
 	} else {
-		c.seen[key] = len(a.Messages)
 		a.Messages = append(a.Messages, msg)
 	}
 }

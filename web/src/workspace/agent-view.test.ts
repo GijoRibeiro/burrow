@@ -274,3 +274,45 @@ it("keeps pending prompts before later live replies and reconciles busy receipts
   expect(articles()[3]).toBe(secondNode);
   expect(articles().at(-1)?.textContent).toContain("Both follow-ups received");
 });
+
+it("retains the loaded page through a transient transcript lookup failure", () => {
+  const view = new AgentView(
+    "Grook",
+    "stable",
+    () => {},
+    async () => {},
+    () => {},
+  );
+  const state: Activity = {
+    kind: "claude",
+    canMessage: true,
+    status: "ready",
+    tools: 0,
+    truncated: false,
+    history: { session: "session-a", start: 940, end: 1000, total: 1000 },
+    messages: [
+      {
+        id: "last",
+        role: "assistant",
+        text: "Keep the live conversation mounted",
+      },
+    ],
+  };
+  view.setActivity(state);
+  const message = view.element.querySelector("article");
+  view.setActivity({
+    kind: "claude",
+    canMessage: false,
+    status: "unavailable",
+    messages: [],
+    tools: 0,
+    truncated: false,
+  });
+  expect(view.element.querySelector("article")).toBe(message);
+  expect(view.element.textContent).toContain(
+    "Keep the live conversation mounted",
+  );
+  view.setActivity(state);
+  expect(view.element.querySelector("article")).toBe(message);
+  view.dispose();
+});

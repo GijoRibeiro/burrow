@@ -7,6 +7,7 @@ export class ConversationScroll {
   private visible = false;
   private userUntil = 0;
   private observer?: ResizeObserver;
+  private anchor?: { element: HTMLElement; top: number };
   constructor(
     private viewport: HTMLElement,
     stack: HTMLElement,
@@ -26,6 +27,7 @@ export class ConversationScroll {
         this.stop();
         this.userUntil = performance.now() + 1500;
         this.position = this.writtenTop = viewport.scrollTop;
+        this.capture();
         this.setFollowing(this.bottom() - viewport.scrollTop < 60);
       },
       { passive: true },
@@ -89,68 +91,93 @@ export class ConversationScroll {
     this.capture();
     this.setFollowing(false);
   }
+  get isFollowing() {
+    return this.following;
+  }
   capture() {
     if (!this.viewport.isConnected || !this.viewport.clientHeight) return;
     this.position = this.viewport.scrollTop;
+    const top = this.viewport.getBoundingClientRect().top;
+    const element = [
+      ...this.viewport.querySelectorAll<HTMLElement>(".conversation-message"),
+    ].find((element) => element.getBoundingClientRect().bottom > top + 1);
+    this.anchor = element
+      ? { element, top: element.getBoundingClientRect().top - top }
+      : undefined;
   }
   reflow() {
-    if (this.following) this.restore(true);
+    this.restore(true);
   }
   latest() {
     this.stop();
     this.setFollowing(true);
     this.restore(true, true);
   }
+  showPage(edge: "start" | "end", following = false) {
+    this.stop();
+    this.setFollowing(following);
+    this.write(edge === "end" ? this.bottom() : 0);
+    this.capture();
+  }
   restore(smooth = false, catchUp = false) {
     if (!this.viewport.isConnected || !this.viewport.clientHeight) return;
     if (!this.following) {
-      this.write(this.position);
+      // Pixel offsets are unstable when messages above the reader change size.
+      // Keep the same message at the same place on screen instead.
+      const anchor = this.anchor;
+      const top = anchor?.element.isConnected
+        ? this.viewport.scrollTop +
+          anchor.element.getBoundingClientRect().top -
+          this.viewport.getBoundingClientRect().top -
+          anchor.top
+        : this.position;
+      this.write(top);
       return;
     }
-    if (this.frame) {
-      if (smooth) return;
-      this.stop();
-    }
+    const gap = this.bottom() - this.viewport.scrollTop;
     const reduced =
       typeof matchMedia !== "undefined" &&
       matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (!smooth || !this.visible || reduced) {
+    // A backlog is a catch-up, not a tour through days of history. Only nearby
+    // arrivals animate. Contraction/reordering must never animate backwards.
+    if (
+      !smooth ||
+      !this.visible ||
+      reduced ||
+      gap <= 0 ||
+      (!catchUp && gap > Math.max(480, this.viewport.clientHeight * 0.75))
+    ) {
+      this.stop();
       this.write(this.bottom());
       return;
     }
+    if (this.frame) return;
     const started = performance.now();
     const origin = this.viewport.scrollTop;
-    let previous = started;
+    const duration = catchUp ? 180 : 220;
     const step = (now: number) => {
-      // Explicitly asking for the latest turn should take the same brief time,
-      // whether the reader is one paragraph or a hundred messages behind.
-      if (catchUp) {
-        const progress = Math.min(1, (now - started) / 180);
-        const eased = 1 - (1 - progress) ** 3;
-        this.write(origin + (this.bottom() - origin) * eased);
-        this.frame = progress < 1 ? requestAnimationFrame(step) : 0;
-        return;
-      }
-      const gap = this.bottom() - this.viewport.scrollTop;
-      if (Math.abs(gap) < 1.5 || !this.visible) {
-        this.write(this.bottom());
+      const target = this.bottom();
+      if (
+        !this.visible ||
+        (!catchUp &&
+          target - this.viewport.scrollTop >
+            Math.max(480, this.viewport.clientHeight * 0.75))
+      ) {
+        this.write(target);
         this.frame = 0;
         return;
       }
-      const elapsed = Math.min(32, Math.max(1, now - previous));
-      const fraction = 1 - Math.exp(-elapsed / 90);
-      // A long reply can add thousands of pixels in one transcript poll.
-      // Cap the travel speed so following it never starts with a sudden jump.
-      const distance =
-        Math.sign(gap) *
+      const progress = Math.min(1, (now - started) / duration);
+      const eased = 1 - (1 - progress) ** 3;
+      // Never rewind to an obsolete origin when resize/acknowledgement changes
+      // the target in the middle of a follow animation.
+      this.write(
         Math.min(
-          Math.abs(gap),
-          elapsed * 2,
-          Math.max(1, Math.abs(gap) * fraction),
-        );
-      this.write(this.viewport.scrollTop + distance);
-      previous = now;
-      this.frame = requestAnimationFrame(step);
+          target,
+          Math.max(this.viewport.scrollTop, origin + (target - origin) * eased),
+        ),
+      );
+      this.frame = progress < 1 ? requestAnimationFrame(step) : 0;
     };
     this.frame = requestAnimationFrame(step);
   }
