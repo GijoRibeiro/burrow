@@ -637,17 +637,6 @@ a {
   border: 0;
   box-shadow: none;
 }
-.send-button {
-  border-radius: 0;
-  background: var(--line);
-  color: var(--ink);
-}
-.send-button:hover {
-  background: var(--line);
-}
-.send-button:disabled {
-  cursor: default;
-}
 .workspace-footer {
   height: 31px;
   min-height: 31px;
@@ -1027,14 +1016,12 @@ body {
 .toolbar-actions > .secondary {
   font-size: 15px;
 }
-.primary,
-.send-button {
+.primary {
   background: var(--ink);
   color: var(--bg);
   border: 1px solid var(--ink);
 }
-.primary:hover,
-.send-button:hover {
+.primary:hover {
   background: var(--bg);
   color: var(--ink);
 }
@@ -1238,13 +1225,6 @@ textarea {
 }
 .message-input::placeholder {
   color: var(--muted);
-}
-.send-button {
-  width: 28px;
-  height: 28px;
-  font-family: monospace;
-  font-size: 20px;
-  flex-shrink: 0;
 }
 .resize-handle::after {
   opacity: 1;

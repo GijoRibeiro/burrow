@@ -694,8 +694,8 @@ test("chat never falls through to a shell; Start Claude preserves the original s
   await draft.press("Enter");
   await expect(draft).toHaveValue("hey u there");
   await expect(
-    pane.getByRole("button", { name: "Send message", exact: true }),
-  ).toBeDisabled();
+    pane.locator(".message-input"),
+  ).not.toHaveAttribute("aria-description", /^Enter to send/);
   expect(capture(shell.id)).not.toContain("hey u there");
   const rejected = await request.post(
     `/api/workspace/terminals/${shell.id}/message`,
@@ -721,8 +721,8 @@ test("chat never falls through to a shell; Start Claude preserves the original s
   });
   await expect(message).toHaveValue("hey u there");
   await expect(
-    agent.getByRole("button", { name: "Send message", exact: true }),
-  ).toBeEnabled({ timeout: 10000 });
+    agent.locator(".message-input"),
+  ).toHaveAttribute("aria-description", /^Enter to send/, { timeout: 10000 });
   await message.press("Enter");
   await expect(agent.locator(".conversation-message.assistant")).toContainText(
     "Claude received: hey u there",
@@ -759,8 +759,8 @@ test("chat never falls through to a shell; Start Claude preserves the original s
   expect(afterExit.status()).toBe(400);
   expect(capture(record.id)).not.toContain("hey u there again");
   await expect(
-    agent.getByRole("button", { name: "Send message", exact: true }),
-  ).toBeDisabled();
+    agent.locator(".message-input"),
+  ).not.toHaveAttribute("aria-description", /^Enter to send/);
   await message.fill("keep this for the next agent");
   await message.press("Enter");
   await expect(message).toHaveValue("keep this for the next agent");
@@ -961,8 +961,8 @@ test("Codex launcher, YOLO restart, distinct identities and duplicate migration"
     "Codex · Terminal ready",
   );
   await expect(
-    pane.getByRole("button", { name: "Send message" }),
-  ).toBeDisabled();
+    pane.locator(".message-input"),
+  ).not.toHaveAttribute("aria-description", /^Enter to send/);
   await pane.getByRole("button", { name: "Open Codex terminal" }).click();
   await send(page, "Codex agent", "/exit");
   await expect
@@ -1104,8 +1104,8 @@ test("local image references show thumbnails and an accessible zoom view", async
     exact: true,
   });
   await expect(
-    pane.getByRole("button", { name: "Send message", exact: true }),
-  ).toBeEnabled();
+    pane.locator(".message-input"),
+  ).toHaveAttribute("aria-description", /^Enter to send/);
   await send(
     page,
     "Image previews",
@@ -2017,7 +2017,7 @@ test("canvas context menus attach existing agents without replacing their sessio
   expect(
     tmux("display-message", "-p", "-t", `=cw-${agent.id}:`, "#{pane_pid}"),
   ).toBe(pid);
-  await page.getByRole("button", { name: "Send message", exact: true }).click();
+  await page.locator(".message-input:visible").press("Enter");
   await expect
     .poll(async () => {
       const data = await (
@@ -2139,8 +2139,8 @@ test("message composers grow for multiline and wrapped drafts, then shrink after
   await input.fill("Ready to send");
   await expect(pane).not.toHaveClass(/has-long-draft/);
   await expect(
-    pane.getByRole("button", { name: "Send message", exact: true }),
-  ).toBeEnabled();
+    pane.locator(".message-input"),
+  ).toHaveAttribute("aria-description", /^Enter to send/);
   await input.press("Enter");
   await expect(input).toHaveValue("");
   await expect
@@ -2182,8 +2182,8 @@ test("chat hyperlinks open separately and code stays literal", async ({
   });
   await pane.getByRole("button", { name: "Agent view", exact: true }).click();
   await expect(
-    pane.getByRole("button", { name: "Send message", exact: true }),
-  ).toBeEnabled();
+    pane.locator(".message-input"),
+  ).toHaveAttribute("aria-description", /^Enter to send/);
   await send(
     page,
     "Link reader",
@@ -2298,8 +2298,8 @@ test("ordinary folders support agents and discover Git when it is added later", 
     exact: true,
   });
   await expect(
-    pane.getByRole("button", { name: "Send message", exact: true }),
-  ).toBeEnabled();
+    pane.locator(".message-input"),
+  ).toHaveAttribute("aria-description", /^Enter to send/);
   await send(page, "Folder agent", "Hello from a folder without Git");
   await expect(pane.locator(".conversation-message.assistant")).toContainText(
     "Hello from a folder without Git",
@@ -2624,8 +2624,8 @@ test("canvas creates agents directly in existing projects and arbitrary folders"
     exact: true,
   });
   await expect(
-    pane.getByRole("button", { name: "Send message", exact: true }),
-  ).toBeEnabled();
+    pane.locator(".message-input"),
+  ).toHaveAttribute("aria-description", /^Enter to send/);
   await send(page, "UI companion", "Hello from the canvas");
   await expect(pane.locator(".conversation-message.assistant")).toContainText(
     "Hello from the canvas",
@@ -2923,8 +2923,8 @@ test("canvas keeps conversations warm, sends immediately, pins two agents and re
     exact: true,
   });
   await expect(
-    pane.getByRole("button", { name: "Send message", exact: true }),
-  ).toBeEnabled();
+    pane.locator(".message-input"),
+  ).toHaveAttribute("aria-description", /^Enter to send/);
   await pane.evaluate((el) => ((window as any).__warmPane = el));
   let release!: () => void;
   const hold = new Promise<void>((resolve) => (release = resolve));
@@ -3897,11 +3897,8 @@ test("chat image paste previews, retries and delivers readable files", async ({
     exact: true,
   });
   const input = pane.getByRole("textbox", { name: "Message to Paste images" });
-  const submit = pane.getByRole("button", {
-    name: "Send message",
-    exact: true,
-  });
-  await expect(submit).toBeEnabled();
+  const submit = input;
+  await expect(submit).toHaveAttribute("aria-description", /^Enter to send/);
   const { createCanvas } = await import("canvas");
   const canvas = createCanvas(400, 240),
     ctx = canvas.getContext("2d");
@@ -3930,7 +3927,7 @@ test("chat image paste previews, retries and delivers readable files", async ({
     );
   }, base64);
   await expect(pane.locator(".composer-image")).toHaveCount(1);
-  await expect(submit).toBeEnabled();
+  await expect(submit).toHaveAttribute("aria-description", /^Enter to send/);
   await expect(input).toHaveValue("Please review this screen");
   await pane
     .getByRole("button", { name: "Preview Screen.png", exact: true })
@@ -3949,7 +3946,7 @@ test("chat image paste previews, retries and delivers readable files", async ({
     base64,
   );
   await expect(pane.locator(".composer-image")).toHaveCount(2);
-  await expect(submit).toBeEnabled();
+  await expect(submit).toHaveAttribute("aria-description", /^Enter to send/);
   await pane.getByRole("button", { name: "Remove Screenshot.png" }).click();
   await expect(pane.locator(".composer-image")).toHaveCount(1);
   await page.screenshot({ path: info.outputPath("pasted-image-draft.png") });
@@ -3994,7 +3991,7 @@ test("chat image paste previews, retries and delivers readable files", async ({
       ),
     base64,
   );
-  await expect(submit).toBeEnabled();
+  await expect(submit).toHaveAttribute("aria-description", /^Enter to send/);
   await input.press("Enter");
   await expect(
     pane.locator(".conversation-message.assistant").last(),
@@ -4036,8 +4033,8 @@ test("chat pages complete public history without growing the live DOM or moving 
     exact: true,
   });
   await expect(
-    pane.getByRole("button", { name: "Send message", exact: true }),
-  ).toBeEnabled();
+    pane.locator(".message-input"),
+  ).toHaveAttribute("aria-description", /^Enter to send/);
   const meta = readdirSync(join(root, "claude/sessions"))
     .map((name) =>
       JSON.parse(readFileSync(join(root, "claude/sessions", name), "utf8")),
@@ -4211,8 +4208,8 @@ test("busy Claude follow-ups acknowledge once and never cover later replies", as
     exact: true,
   });
   await expect(
-    pane.getByRole("button", { name: "Send message", exact: true }),
-  ).toBeEnabled();
+    pane.locator(".message-input"),
+  ).toHaveAttribute("aria-description", /^Enter to send/);
   const first = "Fixture queued prompt: First follow-up while working";
   const second = "Fixture queued prompt: Second follow-up while working";
   await input.fill(first);
@@ -4493,16 +4490,16 @@ test("reading position survives edits above it and transient activity loss", asy
       .toBeLessThan(2);
     missing = true;
     await expect(
-      pane.getByRole("button", { name: "Send message", exact: true }),
-    ).toBeDisabled();
+      pane.locator(".message-input"),
+    ).not.toHaveAttribute("aria-description", /^Enter to send/);
     expect(
       await anchor.evaluate((el) => el === (window as any).__readingAnchor),
     ).toBe(true);
     expect(Math.abs((await anchor.boundingBox())!.y - y)).toBeLessThan(2);
     missing = false;
     await expect(
-      pane.getByRole("button", { name: "Send message", exact: true }),
-    ).toBeEnabled();
+      pane.locator(".message-input"),
+    ).toHaveAttribute("aria-description", /^Enter to send/);
     expect(Math.abs((await anchor.boundingBox())!.y - y)).toBeLessThan(2);
   } finally {
     await request.patch(`/api/workspace/terminals/${terminal.id}`, {

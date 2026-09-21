@@ -56,7 +56,6 @@ export class TerminalPane {
   private composerMeasureKey = "";
   private composerMeasure = el("div", "composer-measure");
   private lastSentSize = "";
-  private send: HTMLButtonElement;
   private currentStatus = "";
   private activity?: Activity;
   private viewVisible = false;
@@ -204,8 +203,6 @@ export class TerminalPane {
     this.message.setAttribute("autocapitalize", "off");
     this.message.placeholder = "Send a command or message…";
     this.refreshComposer();
-    this.send = button("Send message", () => this.submit(), "send-button", "↑");
-    this.send.disabled = true;
     this.message.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
@@ -216,7 +213,7 @@ export class TerminalPane {
       e.preventDefault();
       this.submit();
     };
-    composer.append(this.images.picker, this.message, this.send);
+    composer.append(this.message);
     composer.addEventListener("dragover", (event) => {
       if (event.dataTransfer?.types.includes("Files")) event.preventDefault();
     });
@@ -377,7 +374,6 @@ export class TerminalPane {
       this.socket?.readyState === WebSocket.OPEN
     ) {
       this.status("Exited");
-      this.send.disabled = true;
     }
     if (session.status === "stopped") {
       this.socket?.close();
@@ -502,7 +498,6 @@ export class TerminalPane {
         this.terminal.write(new Uint8Array(e.data), () => this.readScreen());
     };
     ws.onclose = () => {
-      this.send.disabled = true;
       if (this.disposed) return;
       if (this.session.status === "stopped") {
         this.status("Stopped");
@@ -520,7 +515,6 @@ export class TerminalPane {
   }
   private refreshComposer(): void {
     const chat = this.appearance.view === "agent";
-    if (this.images) this.images.picker.hidden = !chat;
     this.message.setAttribute(
       "aria-label",
       `${chat ? "Message to" : "Command for"} ${this.session.name}`,
@@ -532,20 +526,12 @@ export class TerminalPane {
           ? "Message Claude…"
           : "Start Claude to send messages…"
       : "Run a shell command or send terminal input…";
-    if (this.send) {
-      this.send.disabled =
-        this.images.busy ||
-        this.connection.textContent !== "Live" ||
-        (chat && !this.activity?.canMessage);
-      this.send.setAttribute(
-        "aria-label",
-        chat ? "Send message" : "Send terminal input",
-      );
-      this.send.title = chat
-        ? "Send message to Claude"
-        : "Send input to terminal";
-    }
+    const canSend = !this.images?.busy && this.connection.textContent === "Live" && (!chat || this.activity?.canMessage);
+    this.message.setAttribute("aria-description", canSend
+      ? "Enter to send. Shift+Enter for a new line."
+      : "You can write a draft. Sending is not available yet.");
   }
+
   private async submit(): Promise<void> {
     const text = this.message.value;
     const attachments = this.images.snapshot();

@@ -52,8 +52,3 @@
   background: var(--bg);
   border-radius: 3px;
 }
-.terminal-pane .attach-images {
-  flex-shrink: 0;
-  margin-left: 8px;
-  font-size: 24px;
-}
