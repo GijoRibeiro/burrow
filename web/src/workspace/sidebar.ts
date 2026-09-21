@@ -1,4 +1,4 @@
-import { activeWorktrees, worktreeHierarchy } from "./hierarchy";
+import { worktreeHierarchy } from "./hierarchy";
 import { contextMenu } from "./context-menu";
 import { creature } from "./creature";
 import { badge, button, dialog, el } from "./dom";
@@ -45,19 +45,13 @@ export function renderProjectList(ctx: SidebarContext): void {
             (t.program === "claude" || t.program === "codex"))),
     );
     if (ctx.onlyActive && !terminals.length) continue;
-    const worktrees = ctx.onlyActive
-      ? activeWorktrees(
-          p.worktrees,
-          terminals.map((t) => t.path),
-        )
-      : p.worktrees;
     if (
       filter &&
       ![
         p.name,
         p.path,
         ...terminals.map((t) => t.name),
-        ...worktrees.map((w) => w.branch),
+        ...p.worktrees.map((w) => w.branch),
       ]
         .join(" ")
         .toLowerCase()
@@ -117,6 +111,7 @@ export function renderProjectList(ctx: SidebarContext): void {
             ? []
             : [{ label: "Create worktree…", run: () => ctx.newWorktree(p) }]),
           { label: "New terminal…", run: () => ctx.newTerminal(p.id, p.path) },
+          { label: "Worktrees…", run: () => worktreesDialog(ctx, p) },
           {
             label: "Remove project from workspace…",
             run: () => ctx.removeProject(p),
@@ -155,136 +150,36 @@ export function renderProjectList(ctx: SidebarContext): void {
         content.append(
           el("p", "project-error", "Folder unavailable. Check its location."),
         );
-      for (const { tree: w, depth } of worktreeHierarchy(worktrees)) {
-        const row = el(
-          "div",
-          `worktree-row${ctx.selectedPath === w.path ? " selected" : ""}`,
-        );
-        row.style.marginInlineStart = `${Math.min(depth, 8) * 14}px`;
-        row.classList.toggle("child-worktree", !!w.parentPath);
-        const selectTree = button(
-          `Select ${p.name} ${w.branch || w.name}`,
-          () => {
-            ctx.select(p.id, w.path);
-          },
-          "worktree-label",
-          "",
-        );
-        selectTree.title = w.parentPath
-          ? `Child of ${w.parentPath}\n${w.path}`
-          : w.path;
-        selectTree.append(
-          el("span", "worktree-icon", w.main ? "⌂" : "⑂"),
-          el(
-            "span",
-            "worktree-name",
-            p.git === false
-              ? w.name
-              : w.main
-                ? w.branch || "main checkout"
-                : w.name,
-          ),
-        );
-        if (w.main && p.git !== false) {
-          const main = badge("MAIN", "main-badge");
-          main.title = "Main project checkout";
-          selectTree.append(main);
-        }
-        selectTree.setAttribute("aria-haspopup", "menu");
-        row.dataset.worktreePath = w.path;
-        const openWorktreeMenu = (x: number, y: number) =>
-          contextMenu(
-            `${p.name} · ${w.branch || w.name}`,
-            x,
-            y,
-            [
-              ...(p.git === false
-                ? []
-                : [
-                    {
-                      label: "Create child worktree…",
-                      run: () => ctx.newWorktree(p, w.path),
-                    },
-                  ]),
-              {
-                label: "New terminal…",
-                run: () => ctx.newTerminal(p.id, w.path),
-              },
-              w.main
-                ? {
-                    label: "Remove project from workspace…",
-                    run: () => ctx.removeProject(p),
-                    danger: true,
-                  }
-                : {
-                    label: "Remove worktree…",
-                    run: () => ctx.removeWorktree(p, w.path, w.name),
-                    danger: true,
-                  },
-            ],
-            () =>
-              [...ctx.projects.querySelectorAll<HTMLElement>(".worktree-row")]
-                .find((node) => node.dataset.worktreePath === w.path)
-                ?.querySelector<HTMLButtonElement>(".worktree-label")
-                ?.focus({ preventScroll: true }),
-            "var(--ink)",
-          );
-        row.addEventListener("contextmenu", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          openWorktreeMenu(event.clientX, event.clientY);
-        });
-        selectTree.addEventListener("keydown", (event) => {
-          if (
-            event.key === "ContextMenu" ||
-            (event.shiftKey && event.key === "F10")
-          ) {
-            event.preventDefault();
-            const bounds = selectTree.getBoundingClientRect();
-            openWorktreeMenu(bounds.left + 12, bounds.bottom);
-          }
-        });
-        row.append(
-          selectTree,
-          button(
-            `New terminal in ${p.name} ${w.name}`,
-            () => ctx.newTerminal(p.id, w.path),
-            "icon-button",
-            "+",
-          ),
-        );
-        if (!w.main)
-          row.append(
-            button(
-              `Remove worktree ${w.name}`,
-              () => ctx.removeWorktree(p, w.path, w.name),
-              "icon-button subtle",
-              "×",
-            ),
-          );
-        if (w.issue) {
-          const link = el("a", "worktree-issue", w.issue.identifier);
-          link.href = w.issue.url;
-          link.target = "_blank";
-          link.rel = "noopener noreferrer";
-          link.title = w.issue.title;
-          link.setAttribute(
-            "aria-label",
-            `Open ${w.issue.identifier} in Linear`,
-          );
-          row.append(link);
-        }
+      const parentOf = (t: Session) =>
+        t.headId ||
+        ctx.state.tasks?.find((task) => task.id === t.taskId)?.parentId;
+      const known = new Set(terminals.map((t) => t.id));
+      const shown = new Set<string>();
+      const append = (t: Session, depth: number) => {
+        if (shown.has(t.id)) return;
+        shown.add(t.id);
+        const row = sessionRow(ctx, t, visible);
+        row.style.marginInlineStart = `${8 + Math.min(depth, 4) * 16}px`;
+        row.dataset.depth = String(depth);
         content.append(row);
-        for (const t of terminals.filter((t) => t.path === w.path)) {
-          const session = sessionRow(ctx, t, visible);
-          session.style.marginInlineStart = `${Math.min(depth, 8) * 14}px`;
-          content.append(session);
-        }
-      }
-      for (const t of terminals.filter(
-        (t) => !p.worktrees.some((w) => w.path === t.path),
-      ))
-        content.append(sessionRow(ctx, t, visible));
+        for (const child of terminals.filter(
+          (child) => parentOf(child) === t.id,
+        ))
+          append(child, depth + 1);
+      };
+      for (const t of terminals.filter((t) => !known.has(parentOf(t) || "")))
+        append(t, 0);
+      // Keep malformed/cyclic or partially restored teams reachable, too.
+      for (const t of terminals) append(t, 0);
+      if (!terminals.length)
+        content.append(
+          button(
+            "Add agent or terminal to " + p.name,
+            () => ctx.newTerminal(p.id, p.path),
+            "project-empty-agent",
+            "+ Add an agent or terminal",
+          ),
+        );
     }
     ctx.projects.append(group);
   }
@@ -318,6 +213,9 @@ function sessionRow(
     "session-toggle",
     "",
   );
+  const project = ctx.state.projects.find((p) => p.id === t.projectId);
+  const checkout = project?.worktrees.find((w) => w.path === t.path);
+  toggle.title = `${t.name}\n${checkout?.branch || t.path}`;
   toggle.append(
     creature(
       ctx.creatureName(t.id),
@@ -367,6 +265,22 @@ function sessionRow(
         },
       },
       { label: "Rename terminal…", run: () => ctx.renameTerminal(t.id) },
+      ...(project
+        ? [
+            {
+              label: "Checkout details…",
+              run: () => worktreesDialog(ctx, project, t.path),
+            },
+          ]
+        : []),
+      ...(project && project.git !== false
+        ? [
+            {
+              label: "Create child worktree…",
+              run: () => ctx.newWorktree(project, t.path),
+            },
+          ]
+        : []),
     ];
     if (t.program === "claude" || t.program === "codex") {
       if (ctx.state.projects.find((p) => p.id === t.projectId)?.git !== false)
@@ -429,4 +343,86 @@ function sessionRow(
       button(`Remove terminal ${t.name}`, remove, "icon-button subtle", "×"),
     );
   return row;
+}
+
+function worktreesDialog(
+  ctx: SidebarContext,
+  project: Project,
+  selectedPath = ctx.selectedPath,
+): void {
+  const d = el("dialog", "dialog project-worktrees-dialog");
+  d.setAttribute("aria-label", `${project.name} worktrees`);
+  d.append(
+    el("h2", "", "Worktrees"),
+    el("p", "dialog-description", project.name),
+  );
+  const list = el("div", "project-worktrees-list");
+  const act = (run: () => void) => () => {
+    d.close();
+    run();
+  };
+  for (const { tree: w, depth } of worktreeHierarchy(project.worktrees)) {
+    const row = el(
+      "div",
+      `checkout-detail${w.path === selectedPath ? " selected" : ""}`,
+    );
+    row.dataset.worktreePath = w.path;
+    row.style.marginInlineStart = `${Math.min(depth, 4) * 12}px`;
+    const copy = el("div", "checkout-detail-copy");
+    copy.append(el("strong", "", w.branch || w.name), el("small", "", w.path));
+    if (w.main && project.git !== false)
+      copy.append(el("span", "checkout-main", "Main checkout"));
+    if (project.git === false)
+      copy.append(el("span", "checkout-main", "No Git repository"));
+    if (w.issue) {
+      const link = el("a", "", w.issue.identifier);
+      link.setAttribute("aria-label", `Open ${w.issue.identifier} in Linear`);
+      link.href = w.issue.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      copy.append(link);
+    }
+    const actions = el("div", "checkout-detail-actions");
+    actions.append(
+      button(
+        `Select ${project.name} ${w.branch || w.name}`,
+        act(() => ctx.select(project.id, w.path)),
+        "secondary",
+        "Select",
+      ),
+      button(
+        `New terminal in ${project.name} ${w.name}`,
+        act(() => ctx.newTerminal(project.id, w.path)),
+        "secondary",
+        "+ Terminal",
+      ),
+    );
+    if (project.git !== false)
+      actions.append(
+        button(
+          `Create child of ${w.branch || w.name}`,
+          act(() => ctx.newWorktree(project, w.path)),
+          "secondary",
+          "+ Worktree",
+        ),
+      );
+    if (!w.main)
+      actions.append(
+        button(
+          `Remove worktree ${w.name}`,
+          act(() => ctx.removeWorktree(project, w.path, w.name)),
+          "secondary",
+          "Remove…",
+        ),
+      );
+    row.append(copy, actions);
+    list.append(row);
+  }
+  const footer = el("div", "dialog-actions");
+  footer.append(button("Done", () => d.close(), "primary"));
+  d.append(list, footer);
+  d.addEventListener("close", () => d.remove());
+  document.body.append(d);
+  d.showModal();
+  footer.querySelector("button")?.focus();
 }

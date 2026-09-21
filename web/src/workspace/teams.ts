@@ -141,76 +141,8 @@ export function newHeadDialog(
   folder.addEventListener("change", refreshGitPanel);
   refreshGitPanel();
 }
-export function linearConnectionDialog(): void {
-  const d = el("dialog", "dialog"),
-    form = el("form"),
-    key = el("input"),
-    error = el("p", "form-error"),
-    status = el("p", "dialog-description", "Checking connection…");
-  key.type = "password";
-  key.autocomplete = "off";
-  key.required = true;
-  key.placeholder = "Linear personal API key";
-  key.setAttribute("aria-label", "Linear API key");
-  const link = el("a", "", "Create a personal API key in Linear ↗");
-  link.href = "https://linear.app/settings/account/security";
-  link.target = "_blank";
-  link.rel = "noopener noreferrer";
-  const close = button(
-      "Close Linear connection",
-      () => d.close(),
-      "secondary",
-      "Close",
-    ),
-    submit = el("button", "primary", "Connect Linear");
-  submit.type = "submit";
-  const controls = el("div", "dialog-actions");
-  controls.append(close, submit);
-  form.append(
-    el("h2", "", "Linear for your team"),
-    status,
-    key,
-    link,
-    error,
-    controls,
-  );
-  d.append(form);
-  document.body.append(d);
-  d.showModal();
-  let busy = false;
-  void api<{ connected: boolean }>("/linear")
-    .then((result) => {
-      status.textContent = result.connected
-        ? "Connected. Your head can read your assigned tickets and full issue context. Paste a key below only to change accounts."
-        : "Connect once, then ask your head to check your tickets. Your key stays on this computer.";
-    })
-    .catch((e) => {
-      error.textContent = String(e);
-    });
-  form.onsubmit = async (e) => {
-    e.preventDefault();
-    if (busy) return;
-    busy = true;
-    submit.disabled = close.disabled = true;
-    try {
-      await api("/linear", "POST", { apiKey: key.value.trim() });
-      key.value = "";
-      d.close();
-    } catch (e) {
-      error.textContent = e instanceof Error ? e.message : String(e);
-    } finally {
-      busy = false;
-      submit.disabled = close.disabled = false;
-    }
-  };
-  d.addEventListener("cancel", (e) => {
-    if (busy) e.preventDefault();
-  });
-  d.addEventListener("close", () => {
-    key.value = "";
-    d.remove();
-  });
-}
+export { linearConnectionDialog } from "./linear-connection";
+
 export function reviewTeamPlan(
   plan: TeamPlan,
   state: Workspace,
