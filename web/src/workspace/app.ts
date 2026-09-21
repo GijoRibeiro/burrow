@@ -133,11 +133,6 @@ class WorkspaceApp {
     const brand = el("div", "brand");
     brand.setAttribute("aria-label", "Workspace");
     brand.append(creature("Grook", "brand-symbol"));
-    const sideHeading = el("div", "sidebar-heading");
-    sideHeading.append(
-      el("span", "", "PROJECTS"),
-      button("Add project", () => this.addProject(), "icon-button", "+"),
-    );
     this.search.placeholder = "Find projects or terminals";
     this.search.setAttribute("aria-label", "Find projects or terminals");
     this.search.oninput = () => this.renderSidebar();
@@ -171,7 +166,6 @@ class WorkspaceApp {
     );
     this.sidebar.append(
       brand,
-      sideHeading,
       this.search,
       this.activeFilter,
       this.projects,

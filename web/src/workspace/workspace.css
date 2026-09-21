@@ -153,16 +153,6 @@ a {
   margin-left: auto;
   border: 1px solid var(--line);
 }
-.sidebar-heading {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 11px 18px 8px 23px;
-  font-size: 13px;
-  letter-spacing: 1.5px;
-  color: var(--muted);
-  font-weight: 400;
-}
 .icon-button {
   width: 27px;
   height: 27px;
@@ -1656,11 +1646,6 @@ textarea {
 .toolbar h1 {
   font-size: 18px;
   font-weight: 600;
-}
-.sidebar-heading {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 1.4px;
 }
 .project-name {
   font-size: 14px;
