@@ -36,6 +36,9 @@ final class WorkspaceApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
         NSApp.setActivationPolicy(.regular)
         let main = NSMenu()
         let appMenu = NSMenu()
+        let settings = NSMenuItem(title: "Settings…", action: #selector(workspaceCommand(_:)), keyEquivalent: ",")
+        settings.target = self; settings.representedObject = "settings"
+        appMenu.addItem(settings); appMenu.addItem(.separator())
         keepAwakeMenu = NSMenuItem(title: "Keep Mac Awake", action: #selector(toggleKeepAwake), keyEquivalent: "")
         keepAwakeMenu.target = self
         keepAwakeMenu.toolTip = "Keep agents running while the screen is locked. Ends when you quit; closing the lid or choosing Sleep can still suspend the Mac."

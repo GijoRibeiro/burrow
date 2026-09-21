@@ -8,6 +8,8 @@
 
 A terminal is a tmux session on Cloovies' dedicated socket. Each attached browser pane starts a separate tmux client inside a PTY. Binary PTY output streams to xterm.js; JSON input and resize messages go in the other direction. Browser disconnect closes the PTY and its attachment process, while the session and shell remain owned by tmux. App termination has the same property. A fresh attachment redraws the existing screen; tmux retains scrollback and handles scrolling in copy mode.
 
+The attached xterm client advertises 256-color and RGB support to tmux. New programs are exec’d through `env` with inherited `NO_COLOR`, `FORCE_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE`, and `CI` hints removed and `COLORTERM=truecolor` set. tmux retains control of the inner `TERM` value. Existing agents keep their process environments until explicitly restarted. Terminal gutters use host insets rather than border-box padding, so FitAddon measures only the available cell area and preserves bottom clearance.
+
 See the upstream [xterm addon API](https://xtermjs.org/docs/guides/using-addons/) and [PTY implementation](https://github.com/creack/pty) for the two small terminal dependencies.
 
 ## UI
@@ -15,6 +17,8 @@ See the upstream [xterm addon API](https://xtermjs.org/docs/guides/using-addons/
 `app.ts` coordinates snapshots, terminal selection, and actions. `sidebar.ts` renders projects/worktrees/session visibility. `layout.ts` is a pure binary split-tree model; it supports insertion, removal, presets, swaps, and defensive restoration. `split-view.ts` renders the tree and handles pointer/keyboard resizing. `terminal.ts` owns one xterm instance, connection recovery, fitting, and disposal. `dom.ts` provides safe text-based elements and forms, including the native directory-picker bridge.
 
 Terminal panes are retained while the layout changes, rather than rebuilding their xterm instances. Hiding disposes the view and attachment only. Focusing a pane temporarily changes the rendering, not the saved layout. Layout storage is separate from server metadata, so selecting a project can never replace the terminal canvas. Poll results from before a mutation are discarded to prevent an older response overwriting the new state. Status-only updates leave the DOM attached so they cannot steal keyboard focus. Unsent composer drafts are saved per session and restored after hiding a pane or reloading.
+
+`settings.ts` groups Appearance, Connections, and General preferences in one accessible settings page, reachable from the sidebar or ⌘,. Background presets and custom hex colors apply immediately through shared CSS variables and xterm’s theme API, and persist separately from layout. Native ANSI palette entries are unchanged. Text size uses the existing persisted font preference. Keep awake uses one retained native control, including when Settings closes and reopens. The sidebar brand is a centered animated creature with reduced-motion support.
 
 ## Quiet views and creatures
 

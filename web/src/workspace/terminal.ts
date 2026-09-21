@@ -1,3 +1,4 @@
+import { terminalTheme } from "./theme";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -262,8 +263,9 @@ export class TerminalPane {
       scrollback: 10000,
       allowProposedApi: false,
       // Preserve the terminal's ANSI palette and program styling.
-      theme: { background: "#2e2f38" },
+      theme: terminalTheme(),
     });
+    window.addEventListener("workspace-theme", this.updateTheme);
     this.terminal.loadAddon(this.fitAddon);
     this.terminal.open(this.host);
     this.terminal.onData((data) => this.input(data));
@@ -867,6 +869,9 @@ export class TerminalPane {
       }
     });
   }
+  private updateTheme = (): void => {
+    this.terminal.options.theme = terminalTheme();
+  };
   setFontSize(size: number): void {
     this.element.style.setProperty("--content-font-size", `${size}px`);
     this.terminal.options.fontSize = size;
@@ -881,6 +886,7 @@ export class TerminalPane {
     else this.terminal.focus();
   }
   dispose(): void {
+    window.removeEventListener("workspace-theme", this.updateTheme);
     this.images.dispose();
     this.disposed = true;
     this.hostedApps.dispose();

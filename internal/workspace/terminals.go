@@ -34,9 +34,13 @@ func (m *Manager) start(t Terminal) error {
 	}
 	name := sessionName(t.ID)
 	args := []string{"new-session", "-d", "-s", name, "-c", t.Path, "-x", "100", "-y", "30"}
+	// The app may be launched by a non-interactive tool with NO_COLOR/CI set.
+	// Reset those inherited hints inside the persistent tmux server too, before
+	// exec'ing the real program. Keep tmux's TERM (its virtual terminal type).
+	args = append(args, "/usr/bin/env", "-u", "NO_COLOR", "-u", "FORCE_COLOR", "-u", "CLICOLOR", "-u", "CLICOLOR_FORCE", "-u", "CI", "COLORTERM=truecolor")
 	if m.cliPath != "" && (t.Program == "claude" || t.Program == "codex") {
 		// Set these on the executed process too: tmux can supply its own PATH.
-		args = append(args, "-e", "BURROW_AGENT_ID="+t.ID, "/usr/bin/env", "BURROW_AGENT_ID="+t.ID, "BURROW_CLI="+m.cliPath, "PATH="+filepath.Dir(m.cliPath)+":"+os.Getenv("PATH"))
+		args = append(args, "BURROW_AGENT_ID="+t.ID, "BURROW_CLI="+m.cliPath, "PATH="+filepath.Dir(m.cliPath)+":"+os.Getenv("PATH"))
 	}
 	if t.Program == "claude" {
 		binary, err := exec.LookPath("claude")

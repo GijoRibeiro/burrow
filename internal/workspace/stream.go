@@ -41,14 +41,14 @@ func (m *Manager) connect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close()
-	cmd := exec.Command("tmux", "-L", m.socket, "-f", "/dev/null", "attach-session", "-t", "="+sessionName(t.ID))
+	cmd := exec.Command("tmux", "-L", m.socket, "-f", "/dev/null", "-T", "256,RGB", "attach-session", "-t", "="+sessionName(t.ID))
 	// Never inherit an enclosing tmux session or tmux's terminal type.
 	for _, v := range os.Environ() {
-		if !strings.HasPrefix(v, "TMUX=") && !strings.HasPrefix(v, "TERM=") {
+		if !strings.HasPrefix(v, "TMUX=") && !strings.HasPrefix(v, "TERM=") && !strings.HasPrefix(v, "COLORTERM=") {
 			cmd.Env = append(cmd.Env, v)
 		}
 	}
-	cmd.Env = append(cmd.Env, "TERM=xterm-256color")
+	cmd.Env = append(cmd.Env, "TERM=xterm-256color", "COLORTERM=truecolor")
 	f, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: dimension(r.URL.Query().Get("cols"), 100), Rows: dimension(r.URL.Query().Get("rows"), 30)})
 	if err != nil {
 		conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(1011, "could not attach terminal"), time.Now().Add(time.Second))

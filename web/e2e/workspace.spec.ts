@@ -1552,7 +1552,9 @@ test("launch buttons share a row and wrap only in narrow panes", async ({
     );
   await expect.poll(y).toEqual(expect.arrayContaining([expect.any(Number)]));
   expect(new Set(await y()).size).toBe(1);
-  await expect(page.locator(".brand-name")).toHaveCSS("font-family", /Gridbit/);
+  await expect(page.locator(".brand-name")).toHaveCount(0);
+  await expect(page.locator(".brand")).toHaveCSS("justify-content", "center");
+  await expect(page.locator(".brand .creature-frame").first()).toHaveCSS("animation-name", /creature-poses/);
   await page.screenshot({
     path: info.outputPath("launch-buttons-wide.png"),
     animations: "disabled",
@@ -4623,10 +4625,11 @@ test("Linear connection separates connected and credential states", async ({
     }
   });
   await page.goto("/");
-  const open = () =>
-    page
-      .getByRole("button", { name: "Connect Linear for agents", exact: true })
-      .click();
+  const open = async () => {
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Connections", exact: true }).click();
+    await page.getByRole("button", { name: "Linear connection", exact: true }).click();
+  };
   await open();
   const d = page.getByRole("dialog", {
     name: "Linear connection",
@@ -4990,4 +4993,58 @@ test("sidebar motion fits terminals once and terminal questions stay beside the 
       data: { action: "stop" },
     });
   }
+});
+
+test("settings preview and persist backgrounds while native terminal fits inside its pane", async ({ page }, info) => {
+  await page.goto("/");
+  await add(page, "Cloovies", "Settings colors");
+  const pane = page.getByRole("region", { name: "Settings colors terminal", exact: true });
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  const settings = page.getByRole("dialog", { name: "Settings", exact: true });
+  await settings.getByRole("button", { name: "Midnight background" }).click();
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--bg"))).toBe("#15171c");
+  await settings.getByLabel("Background hex color").fill("oops");
+  await settings.getByLabel("Background hex color").press("Enter");
+  await expect(settings.locator(".settings-error")).toContainText("six-digit");
+  await settings.getByLabel("Background hex color").fill("#101418");
+  await settings.getByLabel("Background hex color").press("Enter");
+  await expect(settings.locator(".settings-error")).toBeEmpty();
+  await settings.getByLabel("Text size", { exact: true }).fill("18");
+  await settings.screenshot({ path: info.outputPath("settings-appearance.png") });
+  await page.setViewportSize({ width: 430, height: 820 });
+  expect(await settings.evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
+  await settings.screenshot({ path: info.outputPath("settings-narrow.png") });
+  await settings.getByRole("button", { name: "Connections", exact: true }).click();
+  await expect(settings.getByRole("button", { name: "Linear connection", exact: true })).toBeVisible();
+  await settings.getByRole("button", { name: "General", exact: true }).click();
+  await expect(settings.getByRole("button", { name: "Setup and tools", exact: true })).toBeVisible();
+  await settings.getByRole("button", { name: "Close settings" }).click();
+  await page.setViewportSize({ width: 1250, height: 810 });
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--bg"))).toBe("#101418");
+  await expect(pane.locator(".connection-state")).toHaveText("Live");
+  await expect(pane.locator(".xterm-viewport")).toHaveCSS("background-color", "rgb(16, 20, 24)");
+  for (const height of [810, 705, 943]) {
+    await page.setViewportSize({ width: 1250, height });
+    // The rendered cell grid must leave the full bottom inset even at fractional
+    // font metrics. This caught the previous border-box padding overestimate.
+    await expect.poll(() => pane.evaluate((e) => {
+      const surface = e.querySelector(".pane-surface")!.getBoundingClientRect();
+      const screen = e.querySelector(".xterm-screen")!.getBoundingClientRect();
+      return surface.bottom - screen.bottom;
+    })).toBeGreaterThanOrEqual(13);
+    await expect.poll(() => pane.evaluate((e) => {
+      const surface = e.querySelector(".pane-surface")!.getBoundingClientRect();
+      const screen = e.querySelector(".xterm-screen")!.getBoundingClientRect();
+      return surface.right - screen.right;
+    })).toBeGreaterThanOrEqual(9);
+  }
+  await send(page, "Settings colors", "printf '\\033[31mRed ANSI\\033[0m  \\033[32mGreen ANSI\\033[0m  \\033[38;2;18;171;203mTruecolor cyan\\033[0m\\n'");
+  await send(page, "Settings colors", "printf '\\033[999;1HBottom row · native terminal'; sleep 2");
+  const terminalID = await pane.getAttribute("data-terminal-id");
+  await expect.poll(() => capture(terminalID!)).toContain("Bottom row · native terminal");
+  await pane.screenshot({ path: info.outputPath("native-truecolor-insets.png") });
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await settings.getByRole("button", { name: "Reset background" }).click();
+  await expect(settings.getByLabel("Background hex color")).toHaveValue("#2e2f38");
 });

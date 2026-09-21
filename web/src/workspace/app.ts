@@ -1,3 +1,5 @@
+import { settingsPage } from "./settings";
+import { applyBackground, background } from "./theme";
 import { productInboxButton } from "./complaints";
 import { projectDialog } from "./project-dialog";
 import { agentDialog } from "./agent-dialog";
@@ -97,7 +99,9 @@ class WorkspaceApp {
     "active-project-filter",
     "◉  Active agents only",
   );
+  private awake = keepAwakeControl();
   constructor() {
+    applyBackground(background(), false);
     const root = document.querySelector("#workspace")!;
     this.startHeadButton.disabled = true;
     this.teamGraph = new TeamGraph({
@@ -127,11 +131,8 @@ class WorkspaceApp {
       this.viewSwitch.append(b);
     }
     const brand = el("div", "brand");
-    brand.append(
-      creature("Grook", "brand-symbol"),
-      el("span", "brand-name", "cloovies"),
-      badge("WORKSPACE"),
-    );
+    brand.setAttribute("aria-label", "Workspace");
+    brand.append(creature("Grook", "brand-symbol"));
     const sideHeading = el("div", "sidebar-heading");
     sideHeading.append(
       el("span", "", "PROJECTS"),
@@ -151,7 +152,6 @@ class WorkspaceApp {
       ),
       this.startHeadButton,
     );
-    const shortcuts = el("kbd", "sidebar-shortcut", "⌘?");
     sideBottom.append(
       createActions,
       sidebarAction(
@@ -163,22 +163,11 @@ class WorkspaceApp {
       ),
       productInboxButton(),
       sidebarAction(
-        button("Connect Linear for agents", linearConnectionDialog),
-        "link",
-        "Linear connection",
-      ),
-      sidebarAction(
-        button("Setup and tools", setupDialog),
+        button("Settings", () => this.settings()),
         "tools",
-        "Setup and tools",
+        "Settings",
+        el("kbd", "sidebar-shortcut", "⌘,"),
       ),
-      sidebarAction(
-        button("Keyboard shortcuts", () => this.help()),
-        "keyboard",
-        "Keyboard shortcuts",
-        shortcuts,
-      ),
-      keepAwakeControl(),
     );
     this.sidebar.append(
       brand,
@@ -1381,6 +1370,14 @@ class WorkspaceApp {
       true,
     );
   }
+  private settings(): void {
+    settingsPage({
+      fontSize: () => this.fontSize,
+      setFontSize: (size) => this.font(size - this.fontSize),
+      awake: this.awake,
+      shortcuts: () => this.help(),
+    });
+  }
   private help(): void {
     dialog(
       "Your workspace, from the keyboard",
@@ -1415,6 +1412,7 @@ class WorkspaceApp {
     else if (command === "zoom" && this.active) this.zoom(this.active);
     else if (command === "new") this.newTerminal();
     else if (command === "help") this.help();
+    else if (command === "settings") this.settings();
     else if (/^[1-9]$/.test(command)) {
       const id = ids(this.tree)[Number(command) - 1];
       if (id) this.focusPane(id);
@@ -1457,25 +1455,27 @@ class WorkspaceApp {
         ? e.code.slice(5)
         : e.key.toLowerCase();
     const command =
-      key === "+" || key === "="
-        ? "increase"
-        : key === "-" || key === "_"
-          ? "decrease"
-          : key === "0"
-            ? "reset"
-            : key === "k"
-              ? "choose"
-              : key === "b"
-                ? "sidebar"
-                : key === "enter"
-                  ? "zoom"
-                  : key === "n" && e.shiftKey
-                    ? "new"
-                    : key === "?"
-                      ? "help"
-                      : /^[1-9]$/.test(key)
-                        ? key
-                        : null;
+      key === ","
+        ? "settings"
+        : key === "+" || key === "="
+          ? "increase"
+          : key === "-" || key === "_"
+            ? "decrease"
+            : key === "0"
+              ? "reset"
+              : key === "k"
+                ? "choose"
+                : key === "b"
+                  ? "sidebar"
+                  : key === "enter"
+                    ? "zoom"
+                    : key === "n" && e.shiftKey
+                      ? "new"
+                      : key === "?"
+                        ? "help"
+                        : /^[1-9]$/.test(key)
+                          ? key
+                          : null;
     if (!command) return;
     // Capture before xterm or the composer can consume application shortcuts.
     e.preventDefault();

@@ -1,0 +1,231 @@
+.settings-page {
+  width: min(850px, calc(100vw - 40px));
+  max-height: calc(100dvh - 48px);
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--ink);
+  box-shadow: 0 24px 90px #0006;
+}
+.settings-page::backdrop {
+  background: #0007;
+}
+.settings-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 22px 26px;
+  border-bottom: 1px solid var(--line);
+}
+.settings-heading h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+}
+.settings-close {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 25px;
+}
+.settings-close:hover {
+  background: var(--faint);
+  color: var(--ink);
+}
+.settings-body {
+  display: grid;
+  grid-template-columns: 166px minmax(0, 1fr);
+  min-height: 415px;
+}
+.settings-nav {
+  padding: 18px 12px;
+  border-right: 1px solid var(--line);
+}
+.settings-tab {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 11px 14px;
+  margin-bottom: 4px;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 6px;
+}
+.settings-tab:hover,
+.settings-tab[aria-current="page"] {
+  background: var(--faint);
+  color: var(--ink);
+}
+.settings-content {
+  padding: 28px 30px 32px;
+}
+.settings-section h2 {
+  font-size: 19px;
+  margin: 0 0 8px;
+}
+.settings-intro {
+  color: var(--muted);
+  margin: 0 0 28px;
+  font-size: 14px;
+}
+.settings-section h3 {
+  font-size: 14px;
+  font-weight: 500;
+  margin: 0 0 14px;
+}
+.settings-swatches {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+.settings-swatch {
+  background: transparent;
+  padding: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.settings-swatch-color {
+  display: block;
+  height: 49px;
+  border-radius: 7px;
+  border: 1px solid #ffffff30;
+  margin-bottom: 8px;
+}
+.settings-swatch[aria-pressed="true"] .settings-swatch-color {
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
+}
+.settings-swatch[aria-pressed="true"] {
+  color: var(--ink);
+}
+.settings-custom-color {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 24px;
+  font-size: 13px;
+}
+.settings-custom-color > span {
+  margin-right: auto;
+}
+.settings-custom-color input[type="color"] {
+  width: 32px;
+  height: 32px;
+  padding: 2px;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+.settings-hex {
+  width: 88px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  font:
+    12px "Google Sans Code",
+    monospace;
+}
+.settings-text-button {
+  padding: 6px;
+  background: transparent;
+  color: var(--muted);
+}
+.settings-text-button:hover {
+  color: var(--ink);
+}
+.settings-error:empty {
+  display: none;
+}
+.settings-error {
+  font-size: 12px;
+  color: var(--ink);
+}
+.settings-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+  margin: 14px 0 24px;
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 23px;
+  font-size: 13px;
+}
+.settings-row > span {
+  margin-right: auto;
+}
+.settings-row input {
+  width: 112px;
+  accent-color: var(--ink);
+}
+.settings-row output {
+  width: 33px;
+  font-variant-numeric: tabular-nums;
+}
+.settings-link {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  background: transparent;
+  border-bottom: 1px solid var(--line);
+  padding: 19px 0;
+  text-align: left;
+}
+.settings-link:hover {
+  background: var(--faint);
+}
+.settings-link strong {
+  display: block;
+  font-weight: 500;
+  font-size: 14px;
+}
+.settings-link small {
+  display: block;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.settings-section .keep-awake-control {
+  padding: 0;
+  border: 0;
+}
+@media (max-width: 600px) {
+  .settings-page {
+    width: calc(100vw - 24px);
+  }
+  .settings-body {
+    display: block;
+  }
+  .settings-nav {
+    display: flex;
+    padding: 10px 16px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .settings-tab {
+    text-align: center;
+    margin: 0;
+    padding: 9px 6px;
+  }
+  .settings-content {
+    padding: 22px 20px;
+  }
+  .settings-heading {
+    padding: 18px 20px;
+  }
+  .settings-row {
+    flex-wrap: wrap;
+  }
+  .settings-swatches {
+    gap: 8px;
+  }
+}
