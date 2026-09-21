@@ -64,6 +64,7 @@ type State struct {
 	TmuxAvailable  bool                            `json:"tmuxAvailable"`
 }
 type Manager struct {
+	messageLocks  sync.Map // terminal ID -> *sync.Mutex; serialize native paste and submit
 	conversations sync.Map // terminal ID -> *conversationReader
 	servers       serverDiscovery
 	complaints    complaintMonitor

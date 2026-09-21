@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 // Activity is a read-only companion to the PTY. Only human-facing conversation
@@ -54,7 +56,7 @@ func (m *Manager) activity(id string, query conversationQuery) (a Activity, err 
 	// exits or its session metadata is briefly unavailable. Never infer a log
 	// from another agent merely because it has the same checkout.
 	defer func() {
-		if err != nil || a.History != nil || a.Kind != "claude" {
+		if err != nil || a.History != nil || (a.Kind != "claude" && a.Kind != "codex") {
 			return
 		}
 		if _, ok := m.conversations.Load(id); ok {
@@ -87,13 +89,10 @@ func (m *Manager) activity(id string, query conversationQuery) (a Activity, err 
 		a.Status = "exited"
 		return a, nil
 	}
-	// Codex is a native terminal session. Do not match Claude transcripts from
-	// another process or pretend the Claude chat bridge supports Codex.
-	if t.Program == "codex" {
-		a.Status = "ready"
-		return a, nil
-	}
 	pid, _ := strconv.Atoi(fields[0])
+	if t.Program == "codex" {
+		return m.codexActivity(t, pid, fields[2], query), nil
+	}
 	config := os.Getenv("CLAUDE_CONFIG_DIR")
 	if config == "" {
 		home, _ := os.UserHomeDir()
@@ -233,6 +232,13 @@ func parseConversation(data []byte) Activity {
 	return c.activity
 }
 func (c *conversationLog) consume(line []byte) {
+	var envelope struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(line, &envelope) == nil && (envelope.Type == "session_meta" || envelope.Type == "event_msg" || envelope.Type == "response_item") {
+		c.consumeCodex(line)
+		return
+	}
 	a := &c.activity
 	var entry struct {
 		Type         string `json:"type"`
@@ -349,19 +355,95 @@ func (c *conversationLog) consume(line []byte) {
 // Chat is a separate operation from terminal input. Never send it to an
 // unrecognized process or a Claude process running in the background.
 func (m *Manager) SendMessage(id, text string) error {
-	if strings.TrimSpace(text) == "" {
+	return m.SendChatMessage(id, text, nil)
+}
+
+func (m *Manager) SendChatMessage(id, text string, images []string) error {
+	if strings.TrimSpace(text) == "" && len(images) == 0 {
 		return errors.New("enter a message")
 	}
 	if strings.ContainsAny(text, "\x00\x1b") {
 		return errors.New("messages cannot contain terminal control characters")
 	}
+	value, _ := m.messageLocks.LoadOrStore(id, &sync.Mutex{})
+	lock := value.(*sync.Mutex)
+	lock.Lock()
+	defer lock.Unlock()
 	a, err := m.Activity(id)
 	if err != nil {
 		return err
 	}
-	if a.Kind != "claude" || !a.CanMessage || a.paneID == "" {
-		return errors.New("No foreground Claude session. Start Claude to chat, or switch to Terminal for shell commands")
+	if (a.Kind != "claude" && a.Kind != "codex") || !a.CanMessage || a.paneID == "" {
+		return errors.New("No foreground agent session. Open Terminal to finish setup or start the agent")
+	}
+	paths, err := m.validateChatImages(id, images)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(text) == "" {
+		text = "Please inspect these images."
+	}
+	if a.Kind == "claude" && len(paths) > 0 {
+		text = messageWithImages(text, paths)
+	}
+	if a.Kind == "codex" {
+		// A standalone bracketed paste of an image path creates a native image
+		// attachment in Codex. Do not flatten the image into a textual placeholder.
+		for _, path := range paths {
+			if _, err = m.tmux("send-keys", "-t", a.paneID, "-l", "\x1b[200~"+path+"\x1b[201~"); err != nil {
+				return err
+			}
+		}
+		if _, err = m.tmux("send-keys", "-t", a.paneID, "-l", "\x1b[200~"+text+"\x1b[201~"); err != nil {
+			return err
+		}
+		// Codex groups rapid key bursts as paste; let its paste transaction settle
+		// before Enter so the submit key is not swallowed into a multiline draft.
+		time.Sleep(250 * time.Millisecond)
+		_, err = m.tmux("send-keys", "-t", a.paneID, "Enter")
+		return err
 	}
 	_, err = m.tmux("send-keys", "-t", a.paneID, "-l", "\x1b[200~"+text+"\x1b[201~", ";", "send-keys", "-t", a.paneID, "Enter")
 	return err
+}
+
+func messageWithImages(text string, images []string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		text = "Please inspect these images."
+	}
+	if len(images) == 0 {
+		return text
+	}
+	text += "\n\nAttached images (open these files to view them):"
+	for i, path := range images {
+		text += "\n[Image " + strconv.Itoa(i+1) + "](<" + path + ">)"
+	}
+	return text
+}
+
+func (m *Manager) validateChatImages(id string, images []string) ([]string, error) {
+	if len(images) > 8 {
+		return nil, errors.New("attach up to 8 images per message")
+	}
+	if len(images) == 0 {
+		return nil, nil
+	}
+	root, err := canonical(m.imageUploadDir(id))
+	if err != nil {
+		return nil, errors.New("image attachments are unavailable")
+	}
+	paths := make([]string, 0, len(images))
+	for _, image := range images {
+		path, err := canonical(image)
+		if err != nil || !folderWithin(path, root) || strings.ContainsAny(path, "\x00\x1b\n\r") {
+			return nil, errors.New("image does not belong to this terminal")
+		}
+		info, err := os.Stat(path)
+		if err != nil || !info.Mode().IsRegular() || info.Size() > 8<<20 {
+			return nil, errors.New("image attachment is unavailable or too large")
+		}
+		paths = append(paths, path)
+	}
+	return paths, nil
 }

@@ -92,11 +92,14 @@ func (m *Manager) Handler() http.Handler {
 		respond(w, nil, m.UpdateTerminal(r.PathValue("id"), v.Action, v.Name))
 	})
 	mux.HandleFunc("POST /api/workspace/terminals/{id}/message", func(w http.ResponseWriter, r *http.Request) {
-		var v struct{ Text string }
+		var v struct {
+			Text   string
+			Images []string
+		}
 		if !decode(w, r, &v) {
 			return
 		}
-		respond(w, nil, m.SendMessage(r.PathValue("id"), v.Text))
+		respond(w, nil, m.SendChatMessage(r.PathValue("id"), v.Text, v.Images))
 	})
 	mux.HandleFunc("GET /api/workspace/terminals/{id}/activity", func(w http.ResponseWriter, r *http.Request) {
 		query := conversationQuery{Limit: conversationPageSize, Session: r.URL.Query().Get("session")}

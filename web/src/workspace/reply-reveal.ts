@@ -24,10 +24,8 @@ export class ReplyReveal {
   update(markdown: string, animate = true): void {
     const next = renderChatMarkdown(markdown);
     const text = next.textContent || "";
-    this.wordsPerChunk = Math.max(
-      this.wordsPerChunk,
-      Math.ceil(text.trim().split(/\s+/u).length / 120),
-    );
+    // Keep chunk boundaries fixed for this message's lifetime. Repartitioning
+    // the prefix when the reply grows remounts spans and restarts their fades.
     let unchanged = 0;
     while (
       unchanged < this.text.length &&
@@ -39,6 +37,7 @@ export class ReplyReveal {
       const leaves: Text[] = [];
       while (walker.nextNode()) leaves.push(walker.currentNode as Text);
       let offset = 0;
+      let chunks = 0;
       const arrivals: HTMLElement[] = [];
       for (const leaf of leaves) {
         const start = offset;
@@ -53,7 +52,12 @@ export class ReplyReveal {
         const fragment = document.createDocumentFragment();
         let position = start;
         for (let i = 0; i < tokens.length; i += this.wordsPerChunk) {
-          const value = tokens.slice(i, i + this.wordsPerChunk).join("");
+          // Bound decorative spans even when a short opening grows into a
+          // very long streamed answer. The remaining paragraph is one chunk.
+          const end = chunks >= 120 ? tokens.length : i + this.wordsPerChunk;
+          const value = tokens.slice(i, end).join("");
+          i = end - this.wordsPerChunk;
+          chunks++;
           const chunk = document.createElement("span");
           chunk.className = "reply-chunk";
           chunk.dataset.revealOffset = String(position);

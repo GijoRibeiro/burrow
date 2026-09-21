@@ -91,20 +91,9 @@ export class ComposerImages {
     this.update();
     this.error("");
     try {
-      const data = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result).split(",")[1]);
-        reader.onerror = () =>
-          reject(new Error("The image could not be read."));
-        reader.readAsDataURL(file);
-      });
-      const result = await api<{ path: string }>(
-        `/terminals/${this.terminalId}/images`,
-        "POST",
-        { data },
-      );
+      const path = await uploadImage(this.terminalId, file);
       if (this.disposed || !this.items.includes(item)) return;
-      item.path = result.path;
+      item.path = path;
       status.remove();
       this.update();
     } catch (error) {
@@ -151,4 +140,27 @@ export class ComposerImages {
     this.remove(this.snapshot());
     this.release([...this.detached]);
   }
+}
+
+// Shared by chat attachments and the native terminal's clipboard/drop path.
+export async function uploadImage(
+  terminalId: string,
+  file: File,
+): Promise<string> {
+  if (file.size > 8 * 1024 * 1024)
+    throw new Error("Choose an image smaller than 8 MB.");
+  if (!["image/png", "image/jpeg", "image/gif"].includes(file.type))
+    throw new Error("Choose a PNG, JPEG, or GIF image.");
+  const data = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1]);
+    reader.onerror = () => reject(new Error("The image could not be read."));
+    reader.readAsDataURL(file);
+  });
+  const result = await api<{ path: string }>(
+    `/terminals/${terminalId}/images`,
+    "POST",
+    { data },
+  );
+  return result.path;
 }

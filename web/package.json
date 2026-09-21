@@ -9,7 +9,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "test:workspace": "playwright test --config playwright.workspace.config.ts"
+    "test:workspace": "playwright test --config playwright.workspace.config.ts",
+    "test:workspace:webkit": "playwright test --config playwright.native-smoke.config.ts"
   },
   "keywords": [],
   "author": "",

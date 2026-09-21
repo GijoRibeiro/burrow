@@ -64,6 +64,7 @@ export default defineConfig({
       CLOOVIES_TMUX_SOCKET: socket,
       SHELL: "/bin/sh",
       CLAUDE_CONFIG_DIR: join(root, "claude"),
+      CLOOVIES_CODEX_FIXTURE_DIR: join(root, "codex"),
       PATH: [
         testBin,
         process.env.PATH,

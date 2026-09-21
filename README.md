@@ -46,12 +46,12 @@ CLOOVIES_BACKEND_URL=http://127.0.0.1:4340 npm run dev
 
 1. **Add project**: choose any local folder, or select **GitHub repository** to connect your account, search personal and organization repositories, choose a parent folder and clone name, and **Clone and open**. GitHub CLI is optional and the native app can install it during sign-in. Existing destinations are never overwritten; clones show progress and can be canceled. For local Git repositories, existing worktrees are discovered automatically, including worktrees created outside Cloovies. Adding a linked worktree resolves to its parent project.
 2. **Create worktree**: use the project's **+** button. Choose Manual or **From Linear** to search your tickets, select one, and prefill an editable branch name. Linear links remain with the worktree; new agent drafts include the ticket context. For manual creation, give it a name and a starting branch or commit. New worktrees live in `<project>/.worktrees/<name>` on a branch with the same name. The folder is excluded through Git's local `info/exclude`; the committed `.gitignore` is unchanged.
-3. **New terminal**: choose any project/worktree and a session name. Choose **Claude Code** (the default), **Codex**, or **Shell**. Both agents start in YOLO mode, including after restart. Codex opens its native CLI in Terminal view.
+3. **New terminal**: choose any project/worktree and a session name. Choose **Claude Code** (the default), **Codex**, or **Shell**. Both agents start in YOLO mode, including after restart. Both offer Chat and native Terminal views.
 4. **Choose terminals**: show or hide sessions from across all projects. Project selection does not replace the visible canvas. Use a pane's split buttons to add another terminal to its right or below.
 5. Drag dividers to resize. Double-click a divider to balance it. Drag one header onto another to swap panes. Columns, rows, and grid presets arrange all visible terminals. Focus mode temporarily enlarges one pane.
-6. Each pane has an **Agent / Terminal** switch. Agent shows Claude’s conversation without tool payloads. If no agent is running, **Start Claude** opens an agent in that pane and keeps the original shell available in the sidebar. Chat uses a separate endpoint that checks for a foreground Claude process before sending. Terminal mode explicitly accepts shell commands and other terminal input. The creature animates while Claude works. Click its header sprite to choose a color and companion. New terminals get distinct colors and randomized creatures, preferring unused creatures. View choice, color, creature, and drafts survive hide/show and reload.
+6. Each pane has an **Agent / Terminal** switch. Chat shows Claude or Codex’s conversation without tool payloads. Click either half of the switch to toggle views. If no agent is running, **Start Claude** opens an agent in that pane and keeps the original shell available in the sidebar. Chat uses a separate endpoint that checks for the exact foreground agent process before sending. Terminal mode explicitly accepts shell commands and other terminal input. The creature animates while Claude works. The activity row disappears while idle. Right-click the pane header to choose a color and companion. New terminals get distinct colors and randomized creatures, preferring unused creatures. View choice, color, creature, and drafts survive hide/show and reload.
 7. Agent view renders local PNG, JPEG, GIF, and WebP references as thumbnails. Click a thumbnail to enlarge it, choose Fit or Actual size, and press Escape to close. Images must be inside the terminal’s checkout.
-8. Type in the terminal directly, or use its message input. Enter sends; Shift+Enter inserts a newline. Scroll in the terminal for history, and press Q to leave history mode. Hold Shift while dragging to select terminal text, then copy normally.
+8. Chat has a message composer: Enter sends and Shift+Enter inserts a newline. Terminal has only the CLI’s native input, colors and keyboard behavior. Paste images in either view; in Terminal they stay in the native prompt until you submit. Scroll in the terminal for history, and press Q to leave history mode. Hold Shift while dragging to select terminal text, then copy normally.
 
 Agent chat keeps a recent window of up to 60 messages. **Earlier / Newer** loads older pages from the transcript, and **Back to latest** returns to live replies. Reading history stays put while the agent works. The server caches at most 2 MiB of message text per terminal plus a file-position index; it does not delete or rewrite the original transcript. Very large individual messages remain readable in full.
 
@@ -59,7 +59,7 @@ Right-click a sidebar terminal for Show/Hide, Focus, Rename, Terminate, and (whe
 
 **Hide** only removes the pane from view. **Stop** ends its shell and running processes after confirmation. **Start** opens a fresh shell in a stopped or exited session. Removing a worktree refuses dirty checkouts and worktrees with active terminal sessions; removing a project never deletes its files.
 
-Tab moves to the next visible pane; Shift+Tab moves to the previous one, wrapping around. This also works in focused view. Dialogs retain normal Tab navigation.
+In Chat, Tab and Shift+Tab cycle agents. In Terminal, those keys belong to the CLI; Ctrl+Tab and Ctrl+Shift+Tab cycle panes from either view. Dialogs retain normal Tab navigation.
 
 macOS shortcuts: Cmd+K opens the terminal picker, Cmd+Shift+N creates a terminal, Cmd+B toggles the sidebar, Cmd+Enter focuses a pane, and Cmd+1–9 selects a visible pane. Linux uses Ctrl+Shift for application shortcuts, leaving ordinary Ctrl keys available to the shell.
 
@@ -95,7 +95,7 @@ worktrees, stopped agents, and shell-only projects are hidden until you switch
 the filter off. Filtering never stops or removes a terminal.
 
 Agent conversations render Markdown headings, lists, emphasis, tables, and code
-inside a comfortable reading column. Links and local image previews remain
+across the pane, with replies aligned left and your messages aligned right. Links and local image previews remain
 interactive, and text-size controls also resize the conversation. Your message appears
 immediately while delivery is confirmed. Recent conversations stay mounted in a
 bounded cache when you switch nodes; returning refreshes them in the background.
@@ -210,3 +210,9 @@ The workspace browser suite runs against real temporary Git repositories and tmu
 The legacy entry points (`cmd/bitwise`, `cmd/clooviesd`) serve the new workspace at `/` and preserve the original agent dashboard at `/legacy.html`. The standalone workspace server intentionally does not run the legacy agent services.
 
 Text controls apply to both views: **A+ / A−**, **⌘+ / ⌘−**, and **⌘0** to reset. Pane changes, sidebar toggles, and project groups animate, respecting reduced-motion preferences. Terminal view retains the CLI’s own ANSI colors and formatting with the workspace background.
+
+Chat can also run CLI slash commands such as `/model` and `/mcp`. These open
+Terminal for the interactive menu. When an agent needs your answer, a tinted card
+above the composer opens that same terminal. Sidebar transitions briefly fade
+the content and fit terminals once; existing canvas connections and unaffected
+agent cards keep their animation state during updates.

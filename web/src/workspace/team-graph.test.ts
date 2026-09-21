@@ -195,3 +195,58 @@ it("signals a reply request three times without restarting on unrelated canvas u
     vi.unstubAllGlobals();
   }
 });
+
+it("keeps unrelated cards and moving connections mounted across updates", () => {
+  localStorage.clear();
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
+  const state = {
+    projects: [],
+    tasks: [],
+    plans: [],
+    terminals: [
+      {
+        id: "head",
+        role: "head",
+        program: "claude",
+        name: "Head",
+        status: "running",
+      },
+      {
+        id: "child",
+        headId: "head",
+        program: "codex",
+        name: "Child",
+        status: "running",
+        liveStatus: "working",
+      },
+    ],
+  } as unknown as Workspace;
+  const graph = new TeamGraph({
+    state: () => state,
+    color: () => "#aaaaaa",
+    creature: () => "Grook",
+    select: () => {},
+    review: () => {},
+    task: () => {},
+    menu: () => {},
+    newHead: () => {},
+    newAgent: () => {},
+  });
+  graph.update("");
+  const child = graph.element.querySelector('[data-node-id="child"]');
+  const wire = graph.element.querySelector(".team-wires path");
+  state.terminals[0].name = "Renamed head";
+  graph.update("child");
+  expect(graph.element.querySelector('[data-node-id="child"]')).toBe(child);
+  expect(graph.element.querySelector(".team-wires path")).toBe(wire);
+  state.terminals = state.terminals.filter((t) => t.id !== "child");
+  graph.update("");
+  expect(graph.element.querySelector(".team-wires path")).toBeNull();
+  vi.unstubAllGlobals();
+});

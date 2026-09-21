@@ -3,11 +3,12 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { api } from "./api";
 import { HostedApps } from "./hosted-apps";
-import { ComposerImages } from "./composer-images";
+import { ComposerImages, uploadImage } from "./composer-images";
 import { SlashCommands, isSlashCommand } from "./slash-commands";
 import { reveal } from "./motion";
 import conversationIcon from "../../assets/icons/conversation.svg";
 import terminalIcon from "../../assets/icons/terminal.svg";
+import { contextMenu } from "./context-menu";
 import { button, el } from "./dom";
 import type { Project, Session } from "./types";
 import { AgentView, type Activity } from "./agent-view";
@@ -76,7 +77,7 @@ export class TerminalPane {
     appearance?: PaneAppearance,
   ) {
     this.appearance = appearance || {
-      view: session.program === "codex" ? "terminal" : "agent",
+      view: "agent",
       creature: defaultCreature(session.id),
       color: terminalColor(session.id),
     };
@@ -130,6 +131,17 @@ export class TerminalPane {
     this.element.dataset.terminalId = session.id;
     const header = el("header", "pane-header");
     header.draggable = true;
+    header.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      contextMenu(
+        this.session.name,
+        event.clientX,
+        event.clientY,
+        [{ label: "Customize terminal…", run: () => this.customize() }],
+        () => this.focus(),
+        this.appearance.color,
+      );
+    });
     const identity = el("div", "pane-identity");
     identity.append(
       el("span", "pane-project", project.name),
@@ -173,13 +185,13 @@ export class TerminalPane {
     switcher.setAttribute("aria-label", "Pane view");
     this.agentButton = button(
       "Agent view",
-      () => this.setView("agent"),
+      () => this.toggleView(),
       "view-button",
       "",
     );
     this.terminalButton = button(
       "Terminal view",
-      () => this.setView("terminal"),
+      () => this.toggleView(),
       "view-button",
       "",
     );
@@ -193,15 +205,16 @@ export class TerminalPane {
       icon.style.setProperty("-webkit-mask-image", `url("${source}")`);
       button.append(icon);
     }
-    // Codex has no structured chat transport yet; expose its interactive CLI.
-    this.agentButton.hidden = session.program === "codex";
     switcher.append(this.agentButton, this.terminalButton);
     controls.prepend(switcher);
     identity.title = context.title;
     const surface = el("div", "pane-surface");
     surface.append(this.host, this.agent.element);
     const composer = el("form", "composer");
-    this.commands = new SlashCommands(this.message);
+    this.commands = new SlashCommands(
+      this.message,
+      session.program === "codex" ? "Codex" : "Claude",
+    );
     this.message.rows = 1;
     this.message.spellcheck = false;
     this.message.setAttribute("autocorrect", "off");
@@ -235,6 +248,7 @@ export class TerminalPane {
       context,
       this.hostedApps.element,
       surface,
+      this.agent.notices,
       this.agent.heading,
       this.images.element,
       composer,
@@ -253,6 +267,37 @@ export class TerminalPane {
     this.terminal.loadAddon(this.fitAddon);
     this.terminal.open(this.host);
     this.terminal.onData((data) => this.input(data));
+    this.host.addEventListener(
+      "paste",
+      (event) => {
+        const files = Array.from(event.clipboardData?.files || []).filter(
+          (file) => file.type.startsWith("image/"),
+        );
+        if (!files.length) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        for (const file of files) this.pasteTerminalImage(file);
+      },
+      true,
+    );
+    this.host.addEventListener("workspace-paste-image", (event) => {
+      const bytes = Uint8Array.from(
+        atob((event as CustomEvent<string>).detail),
+        (c) => c.charCodeAt(0),
+      );
+      this.pasteTerminalImage(
+        new File([bytes], "Screenshot.png", { type: "image/png" }),
+      );
+    });
+    this.host.addEventListener("dragover", (event) => {
+      if (event.dataTransfer?.types.includes("Files")) event.preventDefault();
+    });
+    this.host.addEventListener("drop", (event) => {
+      if (!event.dataTransfer?.files.length) return;
+      event.preventDefault();
+      for (const file of Array.from(event.dataTransfer.files))
+        this.pasteTerminalImage(file);
+    });
     this.terminal.onScroll(() => {
       if (
         this.viewVisible &&
@@ -318,6 +363,41 @@ export class TerminalPane {
     this.setView(this.appearance.view, false);
     this.update(session);
     this.connect();
+  }
+  private nativeImageQueue: Promise<void> = Promise.resolve();
+  private pasteTerminalImage(file: File): void {
+    this.nativeImageQueue = this.nativeImageQueue.then(async () => {
+      if (this.disposed) return;
+      const notice = el("div", "terminal-paste-notice", "Attaching image…");
+      notice.setAttribute("role", "status");
+      this.host.append(notice);
+      try {
+        const path = await uploadImage(this.session.id, file);
+        if (this.disposed) return;
+        if (this.socket?.readyState !== WebSocket.OPEN)
+          throw new Error(
+            "Terminal disconnected. Paste the image again after reconnecting.",
+          );
+        this.terminal.paste(
+          !["claude", "codex"].includes(this.session.program || "")
+            ? "'" + path.replaceAll("'", "'\"'\"'") + "'"
+            : path,
+        );
+        notice.remove();
+        if (this.appearance.view === "terminal") this.terminal.focus();
+      } catch (error) {
+        notice.textContent =
+          error instanceof Error ? error.message : String(error);
+        notice.append(
+          button(
+            "Dismiss attachment error",
+            () => notice.remove(),
+            "icon-button",
+            "×",
+          ),
+        );
+      }
+    });
   }
   private captureTerminalScroll(): void {
     const b = this.terminal.buffer.active;
@@ -388,8 +468,11 @@ export class TerminalPane {
       this.connect();
     }
   }
+  private toggleView(): void {
+    this.setView(this.appearance.view === "agent" ? "terminal" : "agent");
+  }
   private setView(view: "agent" | "terminal", focus = true): void {
-    if (this.session.program === "codex") view = "terminal";
+    if (view === "terminal") this.element.classList.remove("has-long-draft");
     const changed = this.appearance.view !== view;
     this.agent.settleArrivals();
     this.appearance.view = view;
@@ -526,16 +609,13 @@ export class TerminalPane {
       "aria-label",
       `${chat ? "Message to" : "Command for"} ${this.session.name}`,
     );
+    const provider = this.session.program === "codex" ? "Codex" : "Claude";
     this.message.placeholder = chat
-      ? this.session.program === "codex"
-        ? "Open Terminal to interact with Codex…"
-        : this.activity?.canMessage
-          ? "Message Claude…"
-          : "Start Claude to send messages…"
+      ? this.activity?.canMessage
+        ? `Message ${provider}…`
+        : `Finish ${provider} setup in Terminal…`
       : "Run a shell command or send terminal input…";
-    this.commands?.setEnabled(
-      chat && this.activity?.kind === "claude" && !!this.activity.canMessage,
-    );
+    this.commands?.setEnabled(chat && !!this.activity?.canMessage);
     const canSend =
       !this.images?.busy &&
       this.connection.textContent === "Live" &&
@@ -558,18 +638,14 @@ export class TerminalPane {
     )
       return;
     if (attachments.length && this.appearance.view !== "agent") {
-      this.agent.showError(
-        "Switch to Agent view to send your attached images to Claude.",
-      );
+      this.agent.showError("Switch to Chat to send your attached images.");
       this.setView("agent");
       return;
     }
     if (this.appearance.view === "agent") {
       if (!this.activity?.canMessage) {
         this.agent.showError(
-          this.session.program === "codex"
-            ? "Open Terminal to interact with Codex."
-            : "No agent is connected. Start Claude to send this message.",
+          "The agent is not ready. Open Terminal to complete setup or check its prompt.",
         );
         return;
       }
@@ -598,7 +674,13 @@ export class TerminalPane {
       // order. An in-flight request must not swallow the next Enter press.
       this.pendingDeliveries++;
       const delivery = this.deliveryQueue.then(() =>
-        api(`/terminals/${this.session.id}/message`, "POST", { text: message }),
+        api(
+          `/terminals/${this.session.id}/message`,
+          "POST",
+          this.session.program === "codex"
+            ? { text, images: attachments.map((item) => item.path) }
+            : { text: message },
+        ),
       );
       this.deliveryQueue = delivery.catch(() => {});
       try {
@@ -691,11 +773,12 @@ export class TerminalPane {
       : text;
     this.saveDraft(this.message.value);
     this.resizeComposer();
-    this.setView(this.session.program === "codex" ? "terminal" : "agent");
+    this.setView("agent");
     this.message.focus();
   }
   private resizeComposer(): boolean {
-    if (!this.message.clientWidth) return false;
+    if (this.appearance.view !== "agent" || !this.message.clientWidth)
+      return false;
     let changed = false;
     const style = getComputedStyle(this.message);
     const key = JSON.stringify([
