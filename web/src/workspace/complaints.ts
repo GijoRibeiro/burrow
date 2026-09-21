@@ -1,4 +1,5 @@
 import { api } from "./api";
+import { sidebarAction } from "./sidebar-controls";
 import { button, el } from "./dom";
 import "./complaints.css";
 interface Finding {
@@ -29,12 +30,14 @@ export function productInboxButton(): HTMLButtonElement {
     "subtle",
     "Product inbox",
   );
+  const status = el("span", "sidebar-action-badge");
+  sidebarAction(b, "inbox", "Product inbox", status);
   const refresh = async () => {
     try {
       const s = await api<{ unread: number; running: boolean; error: boolean }>(
         "/complaints/summary",
       );
-      b.textContent = `Product inbox${s.running ? " · scanning" : s.unread ? ` · ${s.unread} new` : s.error ? " · !" : ""}`;
+      status.textContent = s.running ? "Scanning" : s.unread ? `${s.unread} new` : s.error ? "!" : "";
     } catch {
       /* The main connection indicator already reports server outages. */
     }

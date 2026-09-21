@@ -18,11 +18,16 @@ export function keepAwakeControl(): HTMLElement {
   const hint = el("span", "keep-awake-error");
   hint.setAttribute("role", "status");
   const toggle = button("Keep awake", () => void request(!state?.active), "subtle keep-awake-toggle");
+  const label = el("span", "", "Keep awake");
+  const status = el("span", "keep-awake-status", "…");
+  const track = el("span", "keep-awake-track");
+  track.setAttribute("aria-hidden", "true");
+  toggle.replaceChildren(label, status, track);
   toggle.setAttribute("role", "switch");
   toggle.disabled = true;
   const render = () => {
     toggle.disabled = busy;
-    toggle.textContent = `Keep awake · ${state ? (state.active ? "On" : "Off") : "Retry"}`;
+    status.textContent = state ? (state.active ? "On" : "Off") : "Retry";
     toggle.setAttribute("aria-checked", String(state?.active ?? false));
     toggle.title = "Keeps this Mac running while the screen is locked or off. Ends when you quit. Closing the lid or choosing Sleep can still suspend the Mac.";
     hint.textContent = state?.error ?? "";

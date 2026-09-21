@@ -12,6 +12,7 @@ import {
 } from "./coordination";
 import { nativeHandler, setupDialog } from "./setup";
 import { keepAwakeControl } from "./keep-awake";
+import { sidebarAction } from "./sidebar-controls";
 import { worktreeDialog, issuePrompt } from "./worktree-dialog";
 import "./workspace.css";
 import { captureLayout } from "./motion";
@@ -140,36 +141,19 @@ class WorkspaceApp {
     this.search.setAttribute("aria-label", "Find projects or terminals");
     this.search.oninput = () => this.renderSidebar();
     const sideBottom = el("div", "sidebar-bottom");
-    const legacy = button(
-      "Keyboard shortcuts",
-      () => this.help(),
-      "legacy-link",
-      "Keyboard shortcuts  ⌘?",
-    );
-    sideBottom.append(
-      button(
-        "Add project",
-        () => this.addProject(),
-        "secondary add-project",
-        "+  Add project",
-      ),
-      legacy,
-    );
-    sideBottom.append(
-      button(
-        "Tasks and inbox",
-        () => coordinationDialog(this.coordinationContext()),
-        "secondary",
-      ),
+    const createActions = el("div", "sidebar-create-actions");
+    createActions.append(
+      button("Add project", () => this.addProject(), "secondary", "+ Add project"),
       this.startHeadButton,
-      button(
-        "Connect Linear for agents",
-        linearConnectionDialog,
-        "subtle",
-        "Linear connection",
-      ),
+    );
+    const shortcuts = el("kbd", "sidebar-shortcut", "⌘?");
+    sideBottom.append(
+      createActions,
+      sidebarAction(button("Tasks and inbox", () => coordinationDialog(this.coordinationContext())), "tasks", "Tasks and inbox"),
       productInboxButton(),
-      button("Setup and tools", setupDialog, "subtle"),
+      sidebarAction(button("Connect Linear for agents", linearConnectionDialog), "link", "Linear connection"),
+      sidebarAction(button("Setup and tools", setupDialog), "tools", "Setup and tools"),
+      sidebarAction(button("Keyboard shortcuts", () => this.help()), "keyboard", "Keyboard shortcuts", shortcuts),
       keepAwakeControl(),
     );
     this.sidebar.append(
