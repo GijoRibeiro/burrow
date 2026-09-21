@@ -592,6 +592,18 @@ export class AgentView {
     for (const message of this.historyActivity ? [] : this.pending) {
       const item = this.messageNode(message.id, "user", message.text, true);
       item.classList.add("pending-message", message.state);
+      if (!item.querySelector(".pending-message-outline")) {
+        const outline = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "svg",
+        );
+        outline.classList.add("pending-message-outline");
+        outline.setAttribute("aria-hidden", "true");
+        outline.setAttribute("focusable", "false");
+        const rect = document.createElementNS(outline.namespaceURI, "rect");
+        outline.append(rect);
+        item.append(outline);
+      }
       let status = item.querySelector<HTMLElement>(".message-delivery");
       if (!status) {
         status = el("span", "message-delivery");

@@ -405,8 +405,9 @@ class WorkspaceApp {
           : nextCreature(names);
       this.appearances[terminal.id] = {
         view:
-          appearance?.view ||
-          (terminal.program === "codex" ? "terminal" : "agent"),
+          terminal.program === "codex"
+            ? "terminal"
+            : appearance?.view || "agent",
         color,
         creature: name,
       };

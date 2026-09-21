@@ -1,0 +1,49 @@
+.composer {
+  position: relative;
+}
+.composer-commands {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 12px;
+  width: min(520px, calc(100% - 24px));
+  z-index: 10;
+  max-height: min(310px, 42vh);
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: 0 8px 25px #0004;
+}
+.composer-commands-hint {
+  padding: 6px 8px 10px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.composer-command {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  text-align: left;
+  padding: 9px 10px;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+}
+.composer-command > span {
+  flex: 0 0 auto;
+  font-family: "Google Sans Code", monospace;
+  font-size: 12px;
+}
+.composer-command > small {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+}
+.composer-command:hover,
+.composer-command[aria-selected="true"] {
+  background: color-mix(in srgb, var(--terminal-color) 12%, var(--bg));
+}

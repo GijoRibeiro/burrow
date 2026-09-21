@@ -4,6 +4,7 @@ import "@xterm/xterm/css/xterm.css";
 import { api } from "./api";
 import { HostedApps } from "./hosted-apps";
 import { ComposerImages } from "./composer-images";
+import { SlashCommands, isSlashCommand } from "./slash-commands";
 import { reveal } from "./motion";
 import conversationIcon from "../../assets/icons/conversation.svg";
 import terminalIcon from "../../assets/icons/terminal.svg";
@@ -53,6 +54,7 @@ export class TerminalPane {
   private restartButton: HTMLButtonElement;
   private message = el("textarea", "message-input");
   private images: ComposerImages;
+  private commands: SlashCommands;
   private composerMeasureKey = "";
   private composerMeasure = el("div", "composer-measure");
   private lastSentSize = "";
@@ -191,12 +193,15 @@ export class TerminalPane {
       icon.style.setProperty("-webkit-mask-image", `url("${source}")`);
       button.append(icon);
     }
+    // Codex has no structured chat transport yet; expose its interactive CLI.
+    this.agentButton.hidden = session.program === "codex";
     switcher.append(this.agentButton, this.terminalButton);
     controls.prepend(switcher);
     identity.title = context.title;
     const surface = el("div", "pane-surface");
     surface.append(this.host, this.agent.element);
     const composer = el("form", "composer");
+    this.commands = new SlashCommands(this.message);
     this.message.rows = 1;
     this.message.spellcheck = false;
     this.message.setAttribute("autocorrect", "off");
@@ -204,6 +209,7 @@ export class TerminalPane {
     this.message.placeholder = "Send a command or message…";
     this.refreshComposer();
     this.message.addEventListener("keydown", (e) => {
+      if (this.commands.handleKey(e)) return;
       if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
         this.submit();
@@ -213,7 +219,7 @@ export class TerminalPane {
       e.preventDefault();
       this.submit();
     };
-    composer.append(this.message);
+    composer.append(this.commands.element, this.message);
     composer.addEventListener("dragover", (event) => {
       if (event.dataTransfer?.types.includes("Files")) event.preventDefault();
     });
@@ -383,6 +389,7 @@ export class TerminalPane {
     }
   }
   private setView(view: "agent" | "terminal", focus = true): void {
+    if (this.session.program === "codex") view = "terminal";
     const changed = this.appearance.view !== view;
     this.agent.settleArrivals();
     this.appearance.view = view;
@@ -526,10 +533,19 @@ export class TerminalPane {
           ? "Message Claude…"
           : "Start Claude to send messages…"
       : "Run a shell command or send terminal input…";
-    const canSend = !this.images?.busy && this.connection.textContent === "Live" && (!chat || this.activity?.canMessage);
-    this.message.setAttribute("aria-description", canSend
-      ? "Enter to send. Shift+Enter for a new line."
-      : "You can write a draft. Sending is not available yet.");
+    this.commands?.setEnabled(
+      chat && this.activity?.kind === "claude" && !!this.activity.canMessage,
+    );
+    const canSend =
+      !this.images?.busy &&
+      this.connection.textContent === "Live" &&
+      (!chat || this.activity?.canMessage);
+    this.message.setAttribute(
+      "aria-description",
+      canSend
+        ? "Enter to send. Shift+Enter for a new line."
+        : "You can write a draft. Sending is not available yet.",
+    );
   }
 
   private async submit(): Promise<void> {
@@ -558,6 +574,16 @@ export class TerminalPane {
         return;
       }
       this.agent.showError("");
+      if (isSlashCommand(text)) {
+        if (attachments.length) {
+          this.agent.showError(
+            "Send your attached images in a separate message before running a command.",
+          );
+          return;
+        }
+        await this.runSlashCommand(text);
+        return;
+      }
       const message = this.images.message(text, attachments);
       // Commit the visual send in one frame. Network acknowledgement must not
       // clear/resize the composer a second time during the bubble's entrance.
@@ -611,6 +637,38 @@ export class TerminalPane {
       this.fit();
     }
     this.focus();
+  }
+  private async runSlashCommand(text: string): Promise<void> {
+    this.message.value = "";
+    this.saveDraft("");
+    this.commands.hide();
+    this.resizeComposer();
+    this.pendingDeliveries++;
+    const delivery = this.deliveryQueue.then(() =>
+      api(`/terminals/${this.session.id}/message`, "POST", {
+        text: text.trim(),
+      }),
+    );
+    this.deliveryQueue = delivery.catch(() => {});
+    // CLI commands often open interactive menus and never produce a chat receipt.
+    // Show the actual terminal and avoid a permanently pending chat bubble.
+    this.setView("terminal");
+    try {
+      await delivery;
+    } catch (error) {
+      this.message.value = this.message.value
+        ? `${text}\n\n${this.message.value}`
+        : text;
+      this.saveDraft(this.message.value);
+      this.resizeComposer();
+      this.setView("agent", this.element.contains(document.activeElement));
+      this.saveAppearance();
+      this.agent.showError(
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      this.pendingDeliveries--;
+    }
   }
   setTeamPlan(title: string, count: number, review?: () => void): void {
     let notice =

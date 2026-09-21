@@ -19,6 +19,10 @@ process.stdin.on('data', data => {
     const text = input.slice(0, end).replaceAll('\x1b[200~', '').replaceAll('\x1b[201~', '');
     input = input.slice(end + 1);
     if (text === '/exit') process.exit(0);
+    if (/^\/[a-z][\w:-]*(?:\s|$)/i.test(text)) {
+      process.stdout.write(`Fixture command menu: ${text}\r\n`);
+      continue;
+    }
     if (text.includes('You are now attached to a Burrow head.')) {
       const { execFileSync } = require('node:child_process');
       const run = (...args) => JSON.parse(execFileSync(process.env.BURROW_CLI, args, {encoding:'utf8'}));

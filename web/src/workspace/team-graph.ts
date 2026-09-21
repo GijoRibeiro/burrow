@@ -148,8 +148,7 @@ export class TeamGraph {
     const header = el("div", "team-heading"),
       titles = el("div");
     titles.append(
-      el("span", "team-eyebrow", "THE BIG PICTURE"),
-      el("h2", "", "A little team. A lot in motion."),
+      el("h2", "", "Canvas"),
       this.summary,
     );
     const actions = el("div", "team-heading-actions");

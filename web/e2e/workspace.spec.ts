@@ -35,6 +35,13 @@ async function add(page: Page, project: string, terminal: string) {
     .getByRole("button", { name: "Terminal view", exact: true })
     .click();
 }
+async function openWorktrees(page: Page, name: string) {
+  await page
+    .getByRole("button", { name: `Toggle ${name}`, exact: true })
+    .click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Worktrees…", exact: true }).click();
+  return page.getByRole("dialog", { name: `${name} worktrees`, exact: true });
+}
 async function send(page: Page, name: string, command: string) {
   const field = page.getByRole("textbox", {
     name: new RegExp(`^(Message to|Command for) ${name}$`),
@@ -235,6 +242,7 @@ test("real multi-project workspace: input, worktrees, resize, persistence and li
   await expect(page.getByRole("dialog")).toBeHidden();
   state = await (await request.get("/api/workspace")).json();
   expect(state.projects[0].worktrees).toHaveLength(2);
+  await openWorktrees(page, "Checkout");
   await page
     .getByRole("button", {
       name: "New terminal in Checkout redesign",
@@ -693,9 +701,10 @@ test("chat never falls through to a shell; Start Claude preserves the original s
   await draft.fill("hey u there");
   await draft.press("Enter");
   await expect(draft).toHaveValue("hey u there");
-  await expect(
-    pane.locator(".message-input"),
-  ).not.toHaveAttribute("aria-description", /^Enter to send/);
+  await expect(pane.locator(".message-input")).not.toHaveAttribute(
+    "aria-description",
+    /^Enter to send/,
+  );
   expect(capture(shell.id)).not.toContain("hey u there");
   const rejected = await request.post(
     `/api/workspace/terminals/${shell.id}/message`,
@@ -720,9 +729,11 @@ test("chat never falls through to a shell; Start Claude preserves the original s
     name: "Message to Claude · Plain shell",
   });
   await expect(message).toHaveValue("hey u there");
-  await expect(
-    agent.locator(".message-input"),
-  ).toHaveAttribute("aria-description", /^Enter to send/, { timeout: 10000 });
+  await expect(agent.locator(".message-input")).toHaveAttribute(
+    "aria-description",
+    /^Enter to send/,
+    { timeout: 10000 },
+  );
   await message.press("Enter");
   await expect(agent.locator(".conversation-message.assistant")).toContainText(
     "Claude received: hey u there",
@@ -758,9 +769,10 @@ test("chat never falls through to a shell; Start Claude preserves the original s
   );
   expect(afterExit.status()).toBe(400);
   expect(capture(record.id)).not.toContain("hey u there again");
-  await expect(
-    agent.locator(".message-input"),
-  ).not.toHaveAttribute("aria-description", /^Enter to send/);
+  await expect(agent.locator(".message-input")).not.toHaveAttribute(
+    "aria-description",
+    /^Enter to send/,
+  );
   await message.fill("keep this for the next agent");
   await message.press("Enter");
   await expect(message).toHaveValue("keep this for the next agent");
@@ -956,14 +968,26 @@ test("Codex launcher, YOLO restart, distinct identities and duplicate migration"
   await expect
     .poll(() => capture(session.id))
     .toContain("Codex received: Hello Codex");
-  await pane.getByRole("button", { name: "Agent view", exact: true }).click();
-  await expect(pane.locator(".agent-status-label")).toHaveText(
-    "Codex · Terminal ready",
-  );
   await expect(
-    pane.locator(".message-input"),
-  ).not.toHaveAttribute("aria-description", /^Enter to send/);
-  await pane.getByRole("button", { name: "Open Codex terminal" }).click();
+    pane.getByRole("button", { name: "Agent view", exact: true }),
+  ).toBeHidden();
+  await expect(pane).toHaveAttribute("data-view", "terminal");
+  await pane.locator(".message-input").fill("Restored Codex draft");
+  await page.addInitScript((id) => {
+    const key = "cloovies.workspace.layout.v1";
+    const saved = JSON.parse(localStorage.getItem(key)!);
+    saved.appearances[id].view = "agent";
+    localStorage.setItem(key, JSON.stringify(saved));
+  }, session.id);
+  await page.reload();
+  await expect(pane).toHaveAttribute("data-view", "terminal");
+  await expect(pane.locator(".message-input")).toHaveValue(
+    "Restored Codex draft",
+  );
+  await expect(pane.locator(".message-input")).toHaveAttribute(
+    "aria-description",
+    /^Enter to send/,
+  );
   await send(page, "Codex agent", "/exit");
   await expect
     .poll(() =>
@@ -1103,9 +1127,10 @@ test("local image references show thumbnails and an accessible zoom view", async
     name: "Image previews terminal",
     exact: true,
   });
-  await expect(
-    pane.locator(".message-input"),
-  ).toHaveAttribute("aria-description", /^Enter to send/);
+  await expect(pane.locator(".message-input")).toHaveAttribute(
+    "aria-description",
+    /^Enter to send/,
+  );
   await send(
     page,
     "Image previews",
@@ -1264,18 +1289,9 @@ test("sidebar context menus manage background terminals and project actions", as
   );
   expect(created.ok()).toBe(true);
   await page.reload();
-  await project
-    .getByRole("button", { name: "Select Menus menu-child", exact: true })
-    .click({ button: "right" });
-  const childMenu = page.getByRole("menu", {
-    name: "Actions for Menus · menu-child",
-    exact: true,
-  });
-  await expect(
-    childMenu.getByRole("menuitem", { name: "Remove project from workspace…" }),
-  ).toHaveCount(0);
-  await childMenu
-    .getByRole("menuitem", { name: "Remove worktree…", exact: true })
+  const worktrees = await openWorktrees(page, "Menus");
+  await worktrees
+    .getByRole("button", { name: "Remove worktree menu-child", exact: true })
     .click();
   await page
     .getByRole("dialog")
@@ -1287,7 +1303,10 @@ test("sidebar context menus manage background terminals and project actions", as
       exact: true,
     }),
   ).toHaveCount(0);
-  expect(existsSync(join(path, ".worktrees", "menu-child"))).toBe(false);
+  await expect
+    .poll(() => existsSync(join(path, ".worktrees", "menu-child")))
+    .toBe(false);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   expect(
     execFileSync("git", ["-C", path, "rev-parse", "--verify", "menu-child"], {
       encoding: "utf8",
@@ -1305,25 +1324,15 @@ test("sidebar context menus manage background terminals and project actions", as
     animations: "disabled",
   });
   await page.keyboard.press("Escape");
-  const mainCheckout = project.getByRole("button", {
-    name: "Select Menus main",
-    exact: true,
-  });
-  await mainCheckout.click({ button: "right" });
-  const checkoutMenu = page.getByRole("menu", {
-    name: "Actions for Menus · main",
-    exact: true,
-  });
+  const manager = await openWorktrees(page, "Menus");
   await expect(
-    checkoutMenu.getByRole("menuitem", {
-      name: "Remove worktree…",
-      exact: true,
-    }),
+    manager.getByRole("button", { name: /^Remove worktree/ }),
   ).toHaveCount(0);
-  await page.keyboard.press("Escape");
-  await expect(mainCheckout).toBeFocused();
-  await mainCheckout.press("Shift+F10");
-  await checkoutMenu
+  await manager.getByRole("button", { name: "Done", exact: true }).click();
+  await project
+    .getByRole("button", { name: "Toggle Menus", exact: true })
+    .press("Shift+F10");
+  await projectMenu
     .getByRole("menuitem", { name: "Remove project from workspace…" })
     .click();
   await expect(page.getByRole("dialog")).toContainText(
@@ -1423,9 +1432,11 @@ test("Linear picker creates an editable ticket branch and keeps agent context", 
     .getByRole("button", { name: "Create worktree", exact: true })
     .click();
   await expect(dialog).toHaveCount(0);
+  await openWorktrees(page, "Checkout");
   const link = page.getByRole("link", { name: "Open ENG-42 in Linear" });
   await expect(link).toBeVisible();
   await page.reload();
+  await openWorktrees(page, "Checkout");
   await expect(link).toBeVisible();
   await page
     .getByRole("button", {
@@ -1572,7 +1583,7 @@ test("optional child worktrees and agent coordination preserve the terminal canv
     has: page.getByRole("button", { name: "Toggle Teamwork", exact: true }),
   });
   await group
-    .getByRole("button", { name: "Select Teamwork main", exact: true })
+    .getByRole("button", { name: "Show Lead agent", exact: true })
     .click({ button: "right" });
   await page
     .getByRole("menuitem", { name: "Create child worktree…", exact: true })
@@ -1584,9 +1595,12 @@ test("optional child worktrees and agent coordination preserve the terminal canv
   await form
     .getByRole("button", { name: "Create worktree", exact: true })
     .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  const manager = await openWorktrees(page, "Teamwork");
   await expect(
-    group.locator(".child-worktree").filter({ hasText: "manual-child" }),
+    manager.locator(".checkout-detail").filter({ hasText: "manual-child" }),
   ).toHaveCount(1);
+  await manager.getByRole("button", { name: "Done", exact: true }).click();
   let snapshot = await (await request.get("/api/workspace")).json();
   expect(
     snapshot.terminals.filter(
@@ -1714,7 +1728,8 @@ test("optional child worktrees and agent coordination preserve the terminal canv
       exact: true,
     }),
   ).toBeVisible();
-  await expect(group.locator(".child-worktree")).toHaveCount(2);
+  await expect(group.locator(".worktree-row")).toHaveCount(0);
+  await expect(group.locator(".session-row")).toHaveCount(2);
   snapshot = await (await request.get("/api/workspace")).json();
   expect(
     snapshot.tasks.find((t: { id: string }) => t.id === task.id)
@@ -2138,9 +2153,10 @@ test("message composers grow for multiline and wrapped drafts, then shrink after
     .toBeLessThanOrEqual(1);
   await input.fill("Ready to send");
   await expect(pane).not.toHaveClass(/has-long-draft/);
-  await expect(
-    pane.locator(".message-input"),
-  ).toHaveAttribute("aria-description", /^Enter to send/);
+  await expect(pane.locator(".message-input")).toHaveAttribute(
+    "aria-description",
+    /^Enter to send/,
+  );
   await input.press("Enter");
   await expect(input).toHaveValue("");
   await expect
@@ -2181,9 +2197,10 @@ test("chat hyperlinks open separately and code stays literal", async ({
     exact: true,
   });
   await pane.getByRole("button", { name: "Agent view", exact: true }).click();
-  await expect(
-    pane.locator(".message-input"),
-  ).toHaveAttribute("aria-description", /^Enter to send/);
+  await expect(pane.locator(".message-input")).toHaveAttribute(
+    "aria-description",
+    /^Enter to send/,
+  );
   await send(
     page,
     "Link reader",
@@ -2297,9 +2314,10 @@ test("ordinary folders support agents and discover Git when it is added later", 
     name: "Folder agent terminal",
     exact: true,
   });
-  await expect(
-    pane.locator(".message-input"),
-  ).toHaveAttribute("aria-description", /^Enter to send/);
+  await expect(pane.locator(".message-input")).toHaveAttribute(
+    "aria-description",
+    /^Enter to send/,
+  );
   await send(page, "Folder agent", "Hello from a folder without Git");
   await expect(pane.locator(".conversation-message.assistant")).toContainText(
     "Hello from a folder without Git",
@@ -2426,7 +2444,7 @@ test("GitHub picker searches all repositories, chooses a folder and opens a real
   ).toMatch(/^[a-f0-9]{40}$/);
   await page
     .getByRole("button", {
-      name: "New terminal in My GitHub project My GitHub project",
+      name: "Add agent or terminal to My GitHub project",
       exact: true,
     })
     .click();
@@ -2623,9 +2641,10 @@ test("canvas creates agents directly in existing projects and arbitrary folders"
     name: "UI companion terminal",
     exact: true,
   });
-  await expect(
-    pane.locator(".message-input"),
-  ).toHaveAttribute("aria-description", /^Enter to send/);
+  await expect(pane.locator(".message-input")).toHaveAttribute(
+    "aria-description",
+    /^Enter to send/,
+  );
   await send(page, "UI companion", "Hello from the canvas");
   await expect(pane.locator(".conversation-message.assistant")).toContainText(
     "Hello from the canvas",
@@ -2664,6 +2683,18 @@ test("canvas creates agents directly in existing projects and arbitrary folders"
     (t: any) => t.name === "Second companion",
   );
   expect(second.program).toBe("codex");
+  const codexPane = page.getByRole("region", {
+    name: "Second companion terminal",
+    exact: true,
+  });
+  await expect(codexPane).toHaveAttribute("data-view", "terminal");
+  await expect(
+    page.getByRole("heading", { name: "Canvas", exact: true }),
+  ).toBeVisible();
+  await send(page, "Second companion", "Canvas Codex input");
+  await expect
+    .poll(() => capture(second.id))
+    .toContain("Codex received: Canvas Codex input");
   expect(state.projects.find((p: any) => p.id === second.projectId).git).toBe(
     false,
   );
@@ -2786,7 +2817,7 @@ test("project setup offers Git and head picker initializes folders without hidin
   ).toBe("");
 });
 
-test("active-agent sidebar hides empty worktrees and stopped agents while preserving ancestors", async ({
+test("agent-first sidebar groups workers under heads and hides inactive agents", async ({
   page,
 }, info) => {
   const tree = (path: string, parentPath?: string) => ({
@@ -2838,7 +2869,10 @@ test("active-agent sidebar hides empty worktrees and stopped agents while preser
     ],
     terminals: [
       session("Running Claude", "/worker", "claude"),
-      session("Running Codex", "/worker/src", "codex"),
+      {
+        ...session("Running Codex", "/worker/src", "codex"),
+        headId: "Running Claude",
+      },
       session("Stopped agent", "/stopped", "claude", "stopped"),
       session("Shell", "/main", "shell"),
       session("Inactive shell", "/inactive", "shell", "running", "inactive"),
@@ -2849,26 +2883,40 @@ test("active-agent sidebar hides empty worktrees and stopped agents while preser
   );
   await page.goto("/");
   const group = page.locator('[data-project-id="filtered"]');
-  await expect(group.locator(".worktree-row")).toHaveCount(5);
+  await expect(group.locator(".worktree-row")).toHaveCount(0);
   await page
     .getByRole("button", {
       name: "Show only running agents and their worktrees",
     })
     .click();
-  await expect(group.locator(".worktree-row")).toHaveCount(3);
+  await expect(group.locator(".worktree-row")).toHaveCount(0);
   await expect(group.locator(".session-row")).toHaveCount(2);
-  await expect(group.locator('[data-worktree-path="/parent"]')).toBeVisible();
+  await expect(
+    group.locator('[data-session-id="Running Codex"]'),
+  ).toHaveAttribute("data-depth", "1");
+  await expect(
+    group.locator('[data-session-id="Running Claude"]'),
+  ).toHaveAttribute("data-depth", "0");
+  await group
+    .getByRole("button", { name: "Toggle Filter fixture", exact: true })
+    .click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Worktrees…", exact: true }).click();
+  const manager = page.getByRole("dialog", {
+    name: "Filter fixture worktrees",
+  });
+  await expect(manager.locator(".checkout-detail")).toHaveCount(5);
+  await manager.getByRole("button", { name: "Done", exact: true }).click();
   await expect(group.locator('[data-worktree-path="/unused"]')).toHaveCount(0);
   await expect(page.locator('[data-project-id="inactive"]')).toHaveCount(0);
   await page.screenshot({ path: info.outputPath("active-worktrees.png") });
   await page.reload();
-  await expect(group.locator(".worktree-row")).toHaveCount(3);
+  await expect(group.locator(".worktree-row")).toHaveCount(0);
   await page
     .getByRole("button", {
       name: "Show only running agents and their worktrees",
     })
     .click();
-  await expect(group.locator(".worktree-row")).toHaveCount(5);
+  await expect(group.locator(".worktree-row")).toHaveCount(0);
   await expect(group.locator(".session-row")).toHaveCount(4);
   await expect(page.locator('[data-project-id="inactive"]')).toBeVisible();
 });
@@ -2922,9 +2970,10 @@ test("canvas keeps conversations warm, sends immediately, pins two agents and re
     name: "Warm head terminal",
     exact: true,
   });
-  await expect(
-    pane.locator(".message-input"),
-  ).toHaveAttribute("aria-description", /^Enter to send/);
+  await expect(pane.locator(".message-input")).toHaveAttribute(
+    "aria-description",
+    /^Enter to send/,
+  );
   await pane.evaluate((el) => ((window as any).__warmPane = el));
   let release!: () => void;
   const hold = new Promise<void>((resolve) => (release = resolve));
@@ -3194,7 +3243,9 @@ test("Slack product inbox scans on demand and preserves review controls", async 
     exact: true,
   });
   await expect(dialog.getByLabel("Slack channels")).not.toBeVisible();
-  await expect(dialog.getByRole("button", { name: "Scan settings", exact: true })).toHaveAttribute("aria-expanded", "false");
+  await expect(
+    dialog.getByRole("button", { name: "Scan settings", exact: true }),
+  ).toHaveAttribute("aria-expanded", "false");
   await dialog
     .getByRole("button", { name: "Scan Slack now", exact: true })
     .click();
@@ -3220,7 +3271,9 @@ test("Slack product inbox scans on demand and preserves review controls", async 
   await expect(dialog).toHaveCSS("width", "820px");
   await page.screenshot({ path: info.outputPath("product-inbox.png") });
   await page.setViewportSize({ width: 520, height: 820 });
-  await expect.poll(() => dialog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await expect
+    .poll(() => dialog.evaluate((el) => el.scrollWidth <= el.clientWidth))
+    .toBe(true);
   await page.screenshot({ path: info.outputPath("product-inbox-narrow.png") });
   await page.setViewportSize({ width: 1512, height: 982 });
   await dialog
@@ -3229,7 +3282,9 @@ test("Slack product inbox scans on demand and preserves review controls", async 
   await expect(dialog.locator(".complaint-card")).toHaveCount(0);
   await dialog.getByLabel("Finding status").selectOption("reviewed");
   await expect(dialog.locator(".complaint-card")).toHaveCount(1);
-  await dialog.getByRole("button", { name: "Scan settings", exact: true }).click();
+  await dialog
+    .getByRole("button", { name: "Scan settings", exact: true })
+    .click();
   await dialog.getByLabel("Slack channels").fill("product-questions, finance");
   await dialog.getByLabel("Scan Slack hourly").check();
   await dialog
@@ -3242,7 +3297,9 @@ test("Slack product inbox scans on demand and preserves review controls", async 
   await page
     .getByRole("button", { name: "Product complaints inbox", exact: true })
     .click();
-  await dialog.getByRole("button", { name: "Scan settings", exact: true }).click();
+  await dialog
+    .getByRole("button", { name: "Scan settings", exact: true })
+    .click();
   await expect(dialog.getByLabel("Scan Slack hourly")).toBeChecked();
   await expect(dialog.getByLabel("Slack channels")).toHaveValue(
     "product-questions, finance",
@@ -4032,9 +4089,10 @@ test("chat pages complete public history without growing the live DOM or moving 
     name: "Complete history terminal",
     exact: true,
   });
-  await expect(
-    pane.locator(".message-input"),
-  ).toHaveAttribute("aria-description", /^Enter to send/);
+  await expect(pane.locator(".message-input")).toHaveAttribute(
+    "aria-description",
+    /^Enter to send/,
+  );
   const meta = readdirSync(join(root, "claude/sessions"))
     .map((name) =>
       JSON.parse(readFileSync(join(root, "claude/sessions", name), "utf8")),
@@ -4207,9 +4265,10 @@ test("busy Claude follow-ups acknowledge once and never cover later replies", as
     name: "Message to Busy agent",
     exact: true,
   });
-  await expect(
-    pane.locator(".message-input"),
-  ).toHaveAttribute("aria-description", /^Enter to send/);
+  await expect(pane.locator(".message-input")).toHaveAttribute(
+    "aria-description",
+    /^Enter to send/,
+  );
   const first = "Fixture queued prompt: First follow-up while working";
   const second = "Fixture queued prompt: Second follow-up while working";
   await input.fill(first);
@@ -4370,9 +4429,25 @@ test("sending is one smooth entrance with stable geometry through delayed acknow
     await expect(bubble.locator(".message-delivery")).toHaveText(
       "Sent to terminal",
     );
-    await page.screenshot({ path: info.outputPath("smooth-send-awaiting-agent.png") });
+    const outline = bubble.locator(".pending-message-outline rect");
+    await expect(outline).toHaveCSS("animation-name", "message-waiting-flow");
+    const dash = await outline.evaluate(
+      (el) => getComputedStyle(el).strokeDashoffset,
+    );
+    await expect
+      .poll(() =>
+        outline.evaluate((el) => getComputedStyle(el).strokeDashoffset),
+      )
+      .not.toBe(dash);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await expect(outline).toHaveCSS("animation-name", "none");
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await page.screenshot({
+      path: info.outputPath("smooth-send-awaiting-agent.png"),
+    });
     activity.messages.push({ id: "receipt", role: "user", text: prompt });
     await expect(bubble).not.toHaveClass(/pending-message/);
+    await expect(outline).toHaveCSS("animation-name", "none");
     await expect(input).toHaveValue("My next draft");
     expect(await input.evaluate((el) => el.clientHeight)).toBe(inputHeight);
     const after = await bubble.boundingBox();
@@ -4383,8 +4458,13 @@ test("sending is one smooth entrance with stable geometry through delayed acknow
       probe.active = false;
       return probe;
     });
+    await info.attach("send-frame-measurements", {
+      body: JSON.stringify(probe, null, 2), contentType: "application/json",
+    });
     expect(probe.starts).toBe(1);
-    expect(new Set(probe.samples.map((s: any) => s.height)).size).toBe(1);
+    // WebKit reports tiny float rounding differences during translateY (<0.0001px).
+    const heights = probe.samples.map((s: any) => s.height);
+    expect(Math.max(...heights) - Math.min(...heights)).toBeLessThan(0.001);
     expect(new Set(probe.samples.map((s: any) => s.input)).size).toBe(1);
     for (let i = 1; i < probe.samples.length; i++) {
       expect(probe.samples[i].opacity).toBeGreaterThanOrEqual(
@@ -4394,10 +4474,6 @@ test("sending is one smooth entrance with stable geometry through delayed acknow
         probe.samples[i - 1].top - 1,
       );
     }
-    await info.attach("send-frame-measurements", {
-      body: JSON.stringify(probe, null, 2),
-      contentType: "application/json",
-    });
     await page.screenshot({
       path: info.outputPath("smooth-send-confirmed.png"),
     });
@@ -4490,18 +4566,187 @@ test("reading position survives edits above it and transient activity loss", asy
       .poll(async () => Math.abs((await anchor.boundingBox())!.y - y))
       .toBeLessThan(2);
     missing = true;
-    await expect(
-      pane.locator(".message-input"),
-    ).not.toHaveAttribute("aria-description", /^Enter to send/);
+    await expect(pane.locator(".message-input")).not.toHaveAttribute(
+      "aria-description",
+      /^Enter to send/,
+    );
     expect(
       await anchor.evaluate((el) => el === (window as any).__readingAnchor),
     ).toBe(true);
     expect(Math.abs((await anchor.boundingBox())!.y - y)).toBeLessThan(2);
     missing = false;
-    await expect(
-      pane.locator(".message-input"),
-    ).toHaveAttribute("aria-description", /^Enter to send/);
+    await expect(pane.locator(".message-input")).toHaveAttribute(
+      "aria-description",
+      /^Enter to send/,
+    );
     expect(Math.abs((await anchor.boundingBox())!.y - y)).toBeLessThan(2);
+  } finally {
+    await request.patch(`/api/workspace/terminals/${terminal.id}`, {
+      data: { action: "stop" },
+    });
+  }
+});
+
+test("Linear connection separates connected and credential states", async ({
+  page,
+}, info) => {
+  let connected = true;
+  let failCheck = false;
+  let saved = "existing";
+  await page.route("**/api/workspace/linear", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill(
+        failCheck
+          ? { status: 503, json: { error: "Connection unavailable" } }
+          : { json: { connected } },
+      );
+    } else {
+      const key = route.request().postDataJSON().apiKey;
+      if (key === "invalid")
+        await route.fulfill({
+          status: 400,
+          json: { error: "Invalid API key" },
+        });
+      else {
+        saved = key;
+        connected = true;
+        await route.fulfill({ json: { connected, name: "Test teammate" } });
+      }
+    }
+  });
+  await page.goto("/");
+  const open = () =>
+    page
+      .getByRole("button", { name: "Connect Linear for agents", exact: true })
+      .click();
+  await open();
+  const d = page.getByRole("dialog", {
+    name: "Linear connection",
+    exact: true,
+  });
+  const key = d.getByLabel("Linear API key", { exact: true });
+  await expect(
+    d.getByRole("heading", { name: "Connected", exact: true }),
+  ).toBeVisible();
+  await expect(key).toBeHidden();
+  await d.screenshot({ path: info.outputPath("linear-connected.png") });
+  await d.getByRole("button", { name: "Change Linear account" }).click();
+  await expect(key).toHaveAttribute("type", "password");
+  await expect(key).toBeEmpty();
+  await expect(
+    d.getByRole("button", { name: "Update connection" }),
+  ).toBeDisabled();
+  await d.screenshot({ path: info.outputPath("linear-change-account.png") });
+  await key.fill("invalid");
+  await key.press("Enter");
+  await expect(d.getByRole("alert")).toHaveText("Invalid API key");
+  expect(saved).toBe("existing");
+  await d.getByRole("button", { name: "Cancel Linear connection" }).click();
+  await expect(key).toBeHidden();
+  await d.getByRole("button", { name: "Change Linear account" }).click();
+  await expect(key).toBeEmpty();
+  await key.fill("fixture-key");
+  await key.press("Enter");
+  await expect(d).toContainText("Connected as Test teammate");
+  expect(saved).toBe("fixture-key");
+  await d.getByRole("button", { name: "Done", exact: true }).click();
+  connected = false;
+  await open();
+  await page.setViewportSize({ width: 420, height: 850 });
+  await expect(key).toBeVisible();
+  await d.screenshot({ path: info.outputPath("linear-setup-narrow.png") });
+  expect(await d.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await d.getByRole("button", { name: "Cancel Linear connection" }).click();
+  await page.setViewportSize({ width: 1512, height: 982 });
+  failCheck = true;
+  await open();
+  await expect(d.getByRole("alert")).toContainText("Connection unavailable");
+  failCheck = false;
+  await d
+    .getByRole("button", { name: "Retry Linear connection check" })
+    .click();
+  await expect(key).toBeVisible();
+  await expect(d.locator(".linear-connection-error")).toBeEmpty();
+});
+
+test("chat slash commands open the real CLI without pending bubbles", async ({
+  page,
+  request,
+}, info) => {
+  const path = join(process.env.CLOOVIES_E2E_ROOT!, "SlashCommands");
+  mkdirSync(path);
+  const project = await (
+    await request.post("/api/workspace/projects", {
+      data: { path, name: "Commands" },
+    })
+  ).json();
+  const terminal = await (
+    await request.post("/api/workspace/terminals", {
+      data: {
+        projectId: project.id,
+        path,
+        name: "Command fixture",
+        program: "claude",
+      },
+    })
+  ).json();
+  try {
+    await page.goto("/");
+    await page
+      .getByRole("button", { name: "Show Command fixture", exact: true })
+      .click();
+    const pane = page.getByRole("region", {
+      name: "Command fixture terminal",
+      exact: true,
+    });
+    const input = pane.locator(".message-input");
+    await expect(input).toHaveAttribute("aria-description", /^Enter to send/);
+    await input.fill("/");
+    const menu = pane.getByRole("listbox", { name: "Claude commands" });
+    await expect(menu.getByRole("option")).toHaveCount(8);
+    await input.press("ArrowDown");
+    await input.press("Enter");
+    await expect(input).toHaveValue("/mcp");
+    await expect(menu).toBeHidden();
+    await input.press("Enter");
+    await expect
+      .poll(() => capture(terminal.id))
+      .toContain("Fixture command menu: /mcp");
+    await expect(pane.locator(".xterm-helper-textarea")).toBeFocused();
+    await expect(pane.locator(".pending-message")).toHaveCount(0);
+    await pane.getByRole("button", { name: "Agent view", exact: true }).click();
+    await input.fill("/control-remote");
+    await expect(
+      menu.getByRole("option", { name: "/remote-control", exact: true }),
+    ).toBeVisible();
+    await input.press("Enter");
+    await expect(input).toHaveValue("/remote-control");
+    await input.press("Enter");
+    await expect
+      .poll(() => capture(terminal.id))
+      .toContain("Fixture command menu: /remote-control");
+    await pane.getByRole("button", { name: "Agent view", exact: true }).click();
+    await input.fill("/custom-command an argument");
+    await input.press("Enter");
+    await expect
+      .poll(() => capture(terminal.id))
+      .toContain("Fixture command menu: /custom-command an argument");
+    await pane.getByRole("button", { name: "Agent view", exact: true }).click();
+    await input.fill("/");
+    await pane.screenshot({ path: info.outputPath("slash-command-menu.png") });
+    await input.press("Escape");
+    await expect(menu).toBeHidden();
+    await input.fill("/model");
+    await request.get(`/api/workspace/terminals/${terminal.id}/activity`);
+    await page.route(`**/terminals/${terminal.id}/message`, (route) =>
+      route.fulfill({ status: 409, json: { error: "Agent disconnected" } }),
+    );
+    await input.press("Enter");
+    await expect(input).toHaveValue("/model");
+    await expect(pane.locator(".agent-error")).toContainText(
+      "Agent disconnected",
+    );
+    await expect(pane.locator(".pending-message")).toHaveCount(0);
   } finally {
     await request.patch(`/api/workspace/terminals/${terminal.id}`, {
       data: { action: "stop" },
