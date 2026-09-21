@@ -12,7 +12,10 @@ export class ReplyReveal {
     private animated: boolean,
   ) {
     const words = text.trim().split(/\s+/u).length;
-    this.wordsPerChunk = words <= 35 ? 1 : words <= 160 ? 4 : 10;
+    this.wordsPerChunk = Math.max(
+      words <= 35 ? 1 : words <= 160 ? 4 : 10,
+      Math.ceil(words / 120),
+    );
     this.element = renderChatMarkdown("");
     this.update(text);
     this.animated = true;
@@ -21,6 +24,10 @@ export class ReplyReveal {
   update(markdown: string, animate = true): void {
     const next = renderChatMarkdown(markdown);
     const text = next.textContent || "";
+    this.wordsPerChunk = Math.max(
+      this.wordsPerChunk,
+      Math.ceil(text.trim().split(/\s+/u).length / 120),
+    );
     let unchanged = 0;
     while (
       unchanged < this.text.length &&

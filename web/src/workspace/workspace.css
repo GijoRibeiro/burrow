@@ -2903,3 +2903,45 @@ textarea {
     animation: none;
   }
 }
+
+.conversation-history {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  min-height: 34px;
+  padding: 4px 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font:
+    11px/1.4 "DM Sans",
+    sans-serif;
+}
+.conversation-history[hidden],
+.history-button[hidden] {
+  display: none;
+}
+.history-range {
+  margin-inline: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-button {
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  color: var(--terminal-color);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.history-button:disabled {
+  color: var(--muted);
+  opacity: 0.45;
+  cursor: default;
+}
+.history-button:hover:not(:disabled) {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

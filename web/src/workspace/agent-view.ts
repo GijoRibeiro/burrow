@@ -9,6 +9,7 @@ import claudeIcon from "../../assets/brands/claude.svg";
 import codexIcon from "../../assets/brands/openai.svg";
 
 export interface Activity {
+  history?: { session: string; start: number; end: number; total: number };
   processStatus?: string;
   kind: "shell" | "claude" | "codex";
   canMessage: boolean;
@@ -36,11 +37,35 @@ export class AgentView {
   private stack = el("div", "conversation-stack");
   private latest = button(
     "Follow latest messages",
-    () => this.scroller.latest(),
+    () => this.showLatest(),
     "follow-latest",
     "Latest messages ↓",
   );
   private scroller: ConversationScroll;
+  private liveActivity?: Activity;
+  private historyActivity?: Activity;
+  private historyRequest?: AbortController;
+  private historyVersion = 0;
+  private historyBar = el("div", "conversation-history");
+  private historyRange = el("span", "history-range");
+  private earlier = button(
+    "Earlier messages",
+    () => void this.loadHistory("before"),
+    "history-button",
+    "← Earlier",
+  );
+  private newer = button(
+    "Newer messages",
+    () => void this.loadHistory("after"),
+    "history-button",
+    "Newer →",
+  );
+  private live = button(
+    "Back to latest messages",
+    () => this.showLatest(),
+    "history-button",
+    "Back to latest ↓",
+  );
   private messageNodes = new Map<
     string,
     { element: HTMLElement; text: string; role: string; reply?: ReplyReveal }
@@ -119,14 +144,28 @@ export class AgentView {
       this.content,
       this.stack,
       (following) => {
-        this.latest.hidden = following;
+        this.latest.hidden = following && !this.historyActivity;
       },
     );
     this.content.setAttribute("aria-label", "Agent conversation and output");
     this.error.setAttribute("role", "alert");
     this.notices.hidden = true;
     this.notices.append(this.notice, this.interruptButton);
-    this.element.append(this.notices, this.error, this.content, this.latest);
+    this.historyBar.hidden = true;
+    this.historyBar.setAttribute("aria-label", "Conversation history");
+    this.historyBar.append(
+      this.earlier,
+      this.historyRange,
+      this.newer,
+      this.live,
+    );
+    this.element.append(
+      this.notices,
+      this.error,
+      this.historyBar,
+      this.content,
+      this.latest,
+    );
     this.setCreature(name);
   }
   private clearArrival(element: HTMLElement): void {
@@ -152,6 +191,8 @@ export class AgentView {
   }
   dispose(): void {
     this.setVisible(false);
+    this.historyRequest?.abort();
+    this.historyVersion++;
     this.scroller.dispose();
   }
   setVisible(visible: boolean): void {
@@ -174,6 +215,46 @@ export class AgentView {
   }
   setActivity(activity: Activity): void {
     this.refreshFailed = false;
+    // Session metadata can momentarily disappear while Claude writes/restarts.
+    // A transient lookup failure must not remove the entire DOM then repopulate
+    // it on the next poll (which clamps scrollTop and looks like a random jump).
+    if (
+      !activity.history &&
+      this.liveActivity?.history &&
+      activity.kind === "claude"
+    ) {
+      activity = {
+        ...activity,
+        messages: this.liveActivity.messages,
+        history: this.liveActivity.history,
+      };
+    }
+    const previous = this.liveActivity?.history;
+    if (
+      previous &&
+      activity.history &&
+      previous.session !== activity.history.session
+    ) {
+      this.historyVersion++;
+      this.historyRequest?.abort();
+      this.historyRequest = undefined;
+      this.historyActivity = undefined;
+      this.seenUserMessages.clear();
+      this.messageKeys.clear();
+      this.messageNodes.clear();
+      this.catchUpOnActivity = true;
+    }
+    // Freeze the current page when the reader has scrolled up. Live polling
+    // may advance its window, but must never evict what someone is reading.
+    if (
+      !this.historyActivity &&
+      !this.scroller.isFollowing &&
+      previous &&
+      activity.history?.session === previous.session &&
+      activity.history.start !== previous.start
+    ) {
+      this.historyActivity = this.activity;
+    }
     for (const message of activity.messages) {
       if (message.role !== "user" || this.seenUserMessages.has(message.id))
         continue;
@@ -186,13 +267,106 @@ export class AgentView {
         this.pending.splice(index, 1);
       }
     }
-    this.activity = activity;
-    this.render(this.catchUpOnActivity);
+    this.seenUserMessages = new Set(
+      activity.messages
+        .filter((message) => message.role === "user")
+        .map((message) => message.id),
+    );
+    this.liveActivity = activity;
+    this.activity = this.historyActivity
+      ? {
+          ...activity,
+          messages: this.historyActivity.messages,
+          history: this.historyActivity.history && {
+            ...this.historyActivity.history,
+            total:
+              activity.history?.total ?? this.historyActivity.history.total,
+          },
+        }
+      : activity;
+    const windowMoved =
+      !this.historyActivity &&
+      previous &&
+      activity.history?.start !== previous.start;
+    this.render(this.catchUpOnActivity, !!windowMoved);
     this.catchUpOnActivity = false;
     this.receivedActivity ||=
       activity.canMessage || activity.messages.length > 0;
   }
+  private showLatest(): void {
+    this.historyVersion++;
+    this.historyRequest?.abort();
+    this.historyRequest = undefined;
+    if (this.historyActivity && this.liveActivity) {
+      this.historyActivity = undefined;
+      this.activity = this.liveActivity;
+      this.render(true);
+      this.scroller.showPage("end", true);
+    } else this.scroller.latest();
+    this.updateHistory();
+  }
+  private updateHistory(): void {
+    const page = this.activity?.history;
+    this.historyBar.hidden =
+      !page ||
+      (!this.historyActivity && page.start === 0 && page.end === page.total);
+    if (!page) return;
+    this.historyRange.textContent = `${page.start + 1}–${page.end} of ${page.total}`;
+    this.earlier.disabled = !!this.historyRequest || page.start === 0;
+    this.newer.disabled = !!this.historyRequest || page.end === page.total;
+    this.live.hidden = !this.historyActivity;
+  }
+  private async loadHistory(direction: "before" | "after"): Promise<void> {
+    const page = this.activity?.history;
+    if (!page || this.historyRequest) return;
+    const version = ++this.historyVersion;
+    const controller = new AbortController();
+    this.historyRequest = controller;
+    this.updateHistory();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    try {
+      const query = new URLSearchParams({
+        session: page.session,
+        [direction]: String(direction === "before" ? page.start : page.end),
+      });
+      const response = await fetch(
+        `/api/workspace/terminals/${encodeURIComponent(this.terminalId)}/activity?${query}`,
+        { signal: controller.signal },
+      );
+      if (!response.ok) throw new Error("Could not load history. Try again.");
+      const activity = (await response.json()) as Activity;
+      if (version !== this.historyVersion) return;
+      if (!activity.history)
+        throw new Error("History is temporarily unavailable. Try again.");
+      if (activity.history?.session !== this.liveActivity?.history?.session) {
+        // The agent restarted while a page was loading; discard its old cursor.
+        this.historyActivity = undefined;
+        this.setActivity(activity);
+        this.scroller.showPage("end", true);
+      } else {
+        this.historyActivity = activity;
+        this.activity = activity;
+        this.render(true);
+        this.scroller.showPage(direction === "before" ? "end" : "start");
+      }
+    } catch (error) {
+      if (version === this.historyVersion)
+        this.historyRange.textContent =
+          error instanceof Error && error.name !== "AbortError"
+            ? error.message
+            : "History timed out. Try again.";
+    } finally {
+      clearTimeout(timeout);
+      if (version === this.historyVersion) {
+        this.historyRequest = undefined;
+        this.earlier.disabled = this.activity?.history?.start === 0;
+        this.newer.disabled =
+          this.activity?.history?.end === this.activity?.history?.total;
+      }
+    }
+  }
   beginMessage(text: string): string {
+    if (this.historyActivity) this.showLatest();
     const id = crypto.randomUUID();
     // A retry supersedes the previous failed copy, not an earlier delivered turn.
     this.pending = this.pending.filter(
@@ -225,7 +399,9 @@ export class AgentView {
     if (this.activity) this.activity = { ...this.activity, canMessage: false };
     this.render();
   }
-  private render(catchUp = false): void {
+  private render(catchUp = false, windowMoved = false): void {
+    this.captureScroll();
+    this.updateHistory();
     const a = this.activity;
     const live = this.connection === "Live";
     const attention =
@@ -296,13 +472,12 @@ export class AgentView {
     const conversation = a?.kind === "claude" && a.messages.length > 0;
     const key = JSON.stringify([
       conversation
-        ? [a.messages, a.truncated]
+        ? [a.messages, a.truncated, a.history?.start, a.history?.end]
         : [this.screen, a?.kind, a?.status, live],
       this.pending,
     ]);
     if (key === this.signature) return;
     this.signature = key;
-    this.captureScroll();
     const nodes: HTMLElement[] = [];
     if (conversation) {
       if (a.truncated)
@@ -414,7 +589,7 @@ export class AgentView {
       const previews = imagePreviews(this.terminalId, this.screen);
       if (previews) nodes.push(previews);
     }
-    for (const message of this.pending) {
+    for (const message of this.historyActivity ? [] : this.pending) {
       const item = this.messageNode(message.id, "user", message.text, true);
       item.classList.add("pending-message", message.state);
       let status = item.querySelector<HTMLElement>(".message-delivery");
@@ -447,6 +622,12 @@ export class AgentView {
     }
     // Keep unchanged messages mounted: selection, images and arrival animations
     // survive polling and acknowledgement of optimistic outgoing messages.
+    // Remove evicted rows first. Otherwise a sliding window moves every retained
+    // row before the obsolete first child, restarting animations unnecessarily.
+    const wanted = new Set(nodes);
+    for (const child of [...this.stack.children]) {
+      if (!wanted.has(child as HTMLElement)) child.remove();
+    }
     let cursor = this.stack.firstChild;
     for (const node of nodes) {
       if (node === cursor) cursor = cursor.nextSibling;
@@ -461,10 +642,14 @@ export class AgentView {
       if (value.element.parentElement !== this.stack)
         this.messageNodes.delete(key);
     }
-    const activeIds = new Set(a?.messages.map((message) => message.id));
+    const activeIds = new Set(
+      this.liveActivity?.messages.map((message) => message.id),
+    );
     for (const key of this.messageKeys.keys())
       if (!activeIds.has(key)) this.messageKeys.delete(key);
-    if (!this.receivedActivity || catchUp) this.scroller.restore();
+    if (this.historyActivity) this.latest.hidden = false;
+    if (!this.receivedActivity || catchUp || windowMoved)
+      this.scroller.restore();
     else this.scroller.reflow();
   }
   private messageNode(

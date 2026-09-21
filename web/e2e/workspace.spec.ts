@@ -3422,11 +3422,17 @@ test("chat follows arrivals and reflow, pauses for history and resumes on send",
       .first()
       .evaluate((el) => ((window as any).__originalMessage = el));
     await content.evaluate((el) => {
-      const probe = { positions: [] as number[], active: true };
+      const probe = {
+        positions: [] as number[],
+        active: true,
+        arrived: 0,
+        settled: 0,
+      };
       (window as any).__scrollProbe = probe;
       const arrivals = new MutationObserver(() => {
         const reply = el.querySelector('article[data-message-id="reply-one"]');
         if (!reply) return;
+        probe.arrived = performance.now();
         for (const animation of reply.getAnimations({ subtree: true })) {
           animation.pause();
           animation.currentTime = 0;
@@ -3436,6 +3442,12 @@ test("chat follows arrivals and reflow, pauses for history and resumes on send",
       arrivals.observe(el, { childList: true, subtree: true });
       const sample = () => {
         probe.positions.push(el.scrollTop);
+        if (
+          probe.arrived &&
+          !probe.settled &&
+          el.scrollHeight - el.scrollTop - el.clientHeight < 2
+        )
+          probe.settled = performance.now();
         if (probe.active) requestAnimationFrame(sample);
       };
       requestAnimationFrame(sample);
@@ -3453,16 +3465,18 @@ test("chat follows arrivals and reflow, pauses for history and resumes on send",
         .first()
         .evaluate((el) => el === (window as any).__originalMessage),
     ).toBe(true);
-    const largestStep = await page.evaluate(() => {
+    const motion = await page.evaluate(() => {
       const probe = (window as any).__scrollProbe;
       probe.active = false;
-      return Math.max(
-        ...probe.positions
+      return {
+        duration: probe.settled - probe.arrived,
+        backwards: probe.positions
           .slice(1)
-          .map((top: number, i: number) => Math.abs(top - probe.positions[i])),
-      );
+          .some((top: number, i: number) => top < probe.positions[i] - 1),
+      };
     });
-    expect(largestStep).toBeLessThanOrEqual(65);
+    expect(motion.duration).toBeLessThan(400);
+    expect(motion.backwards).toBe(false);
     const reply = content.locator('article[data-message-id="reply-one"]');
     await expect(reply).toHaveCSS("animation-name", "none");
     const chunks = reply.locator(".reply-chunk-arrival");
@@ -3983,7 +3997,7 @@ test("chat image paste previews, retries and delivers readable files", async ({
   });
 });
 
-test("chat retains complete public history across large tool results and new replies", async ({
+test("chat pages complete public history without growing the live DOM or moving a history reader", async ({
   page,
   request,
 }, info) => {
@@ -4032,7 +4046,7 @@ test("chat retains complete public history across large tool results and new rep
       uuid: id,
       message: { content: text, stop_reason: "end_turn" },
     }) + "\n";
-  const history = Array.from({ length: 150 }, (_, i) =>
+  const history = Array.from({ length: 1500 }, (_, i) =>
     record(
       `history-${i}`,
       `Public update ${i}: this conversation belongs in the chat.`,
@@ -4067,37 +4081,66 @@ test("chat retains complete public history across large tool results and new rep
       "\n" +
       record("latest", "The latest reply after a large tool result."),
   );
-  await expect(pane.locator(".conversation-message.assistant")).toHaveCount(
-    151,
+  const conversation = pane.locator(".agent-content");
+  await expect(pane.locator(".conversation-message.assistant")).toHaveCount(60);
+  await expect(conversation).toContainText(
+    "The latest reply after a large tool result.",
   );
-  await expect(pane.locator(".agent-content")).toContainText(
-    "Public update 0:",
-  );
-  await expect(pane.locator(".agent-content")).not.toContainText(
-    "Hidden tool output",
-  );
-  await expect(pane.locator(".history-note")).toHaveCount(0);
-  await expect(pane.locator(".conversation-message.user")).toHaveCount(0);
-  await expect(pane.locator(".agent-content")).not.toContainText(
-    "<task-notification>",
-  );
+  await expect(conversation).not.toContainText("Public update 0:");
+  await expect(conversation).not.toContainText("Hidden tool output");
+  await expect(conversation).not.toContainText("<task-notification>");
   expect(readFileSync(transcript, "utf8")).toContain("<task-notification>");
-  // A cold reopen must recover the same history, not just messages seen while open.
+  const response = await (
+    await request.get(`/api/workspace/terminals/${terminal.id}/activity`)
+  ).json();
+  expect(response.messages).toHaveLength(60);
+  expect(response.history.total).toBe(1501);
+  const oldest = await (
+    await request.get(
+      `/api/workspace/terminals/${terminal.id}/activity?before=60&session=${response.history.session}`,
+    )
+  ).json();
+  expect(oldest.messages[0].text).toContain("Public update 0:");
   await page.reload();
-  await expect(pane.locator(".conversation-message.assistant")).toHaveCount(
-    151,
-  );
+  await expect(pane.locator(".conversation-message.assistant")).toHaveCount(60);
+  // Scrolling up freezes the current page, even if many newer windows arrive.
+  await conversation.evaluate((el) => {
+    el.scrollTop = 100;
+    el.dispatchEvent(new Event("scroll"));
+  });
+  const firstId = await conversation
+    .locator("article")
+    .first()
+    .getAttribute("data-message-id");
+  const beforeTop = await conversation.evaluate((el) => el.scrollTop);
   appendFileSync(
     transcript,
-    record("new-live", "A new live reply remains visible too."),
+    Array.from({ length: 300 }, (_, i) =>
+      record(`burst-${i}`, `New live reply ${i}.`),
+    ).join(""),
   );
-  await expect(pane.locator(".conversation-message.assistant")).toHaveCount(
-    152,
-  );
-  await expect(pane.locator(".agent-content")).toContainText(
-    "A new live reply remains visible too.",
-  );
-  const conversation = pane.locator(".agent-content");
+  await expect(pane.locator(".history-range")).toContainText("1801");
+  expect(
+    await conversation
+      .locator("article")
+      .first()
+      .getAttribute("data-message-id"),
+  ).toBe(firstId);
+  expect(await conversation.evaluate((el) => el.scrollTop)).toBe(beforeTop);
+  await expect(pane.locator(".conversation-message.assistant")).toHaveCount(60);
+  await pane
+    .getByRole("button", { name: "Earlier messages", exact: true })
+    .click();
+  await expect(pane.locator(".history-range")).toHaveText("1382–1441 of 1801");
+  await expect(pane.locator(".conversation-message.assistant")).toHaveCount(60);
+  await pane
+    .getByRole("button", { name: "Newer messages", exact: true })
+    .click();
+  await expect(pane.locator(".history-range")).toHaveText("1442–1501 of 1801");
+  await pane
+    .getByRole("button", { name: "Back to latest messages", exact: true })
+    .click();
+  await expect(conversation).toContainText("New live reply 299.");
   await expect
     .poll(() =>
       conversation.evaluate(
@@ -4105,22 +4148,30 @@ test("chat retains complete public history across large tool results and new rep
       ),
     )
     .toBeLessThan(3);
-  await conversation.evaluate((el) => {
-    el.scrollTop = 0;
-    el.dispatchEvent(new Event("scroll"));
+  // Sliding the live window keeps surviving rows mounted and old animations settled.
+  await conversation
+    .locator('article[data-message-id="burst-299"]')
+    .evaluate((el) => ((window as any).__retained = el));
+  appendFileSync(transcript, record("last-live", "Final live update"));
+  await expect(conversation).toContainText("Final live update");
+  expect(
+    await conversation
+      .locator('article[data-message-id="burst-299"]')
+      .evaluate((el) => el === (window as any).__retained),
+  ).toBe(true);
+  await expect(pane.locator(".conversation-message.assistant")).toHaveCount(60);
+  // Cached file identity keeps historical pages readable after the agent stops.
+  await request.patch(`/api/workspace/terminals/${terminal.id}`, {
+    data: { action: "stop" },
   });
-  await expect(
-    pane.getByText("Public update 0: this conversation belongs in the chat.", {
-      exact: true,
-    }),
-  ).toBeVisible();
-  await page.screenshot({
-    path: info.outputPath("recovered-chat-history.png"),
-  });
-  const response = await (
-    await request.get(`/api/workspace/terminals/${terminal.id}/activity`)
+  const stopped = await (
+    await request.get(
+      `/api/workspace/terminals/${terminal.id}/activity?before=60&session=${response.history.session}`,
+    )
   ).json();
-  expect(response.messages).toHaveLength(152);
+  expect(stopped.messages[0].text).toContain("Public update 0:");
+  expect(stopped.canMessage).toBe(false);
+  await page.screenshot({ path: info.outputPath("bounded-chat-history.png") });
 });
 
 test("busy Claude follow-ups acknowledge once and never cover later replies", async ({
@@ -4346,6 +4397,106 @@ test("sending is one smooth entrance with stable geometry through delayed acknow
     });
   } finally {
     release();
+    await request.patch(`/api/workspace/terminals/${terminal.id}`, {
+      data: { action: "stop" },
+    });
+  }
+});
+
+test("reading position survives edits above it and transient activity loss", async ({
+  page,
+  request,
+}) => {
+  const folder = join(process.env.CLOOVIES_E2E_ROOT!, "ReadingAnchor");
+  mkdirSync(folder, { recursive: true });
+  const project = await (
+    await request.post("/api/workspace/projects", {
+      data: { path: folder, name: "Reading anchor" },
+    })
+  ).json();
+  const terminal = await (
+    await request.post("/api/workspace/terminals", {
+      data: {
+        projectId: project.id,
+        program: "claude",
+        name: "Reading fixture",
+      },
+    })
+  ).json();
+  const activity = {
+    kind: "claude",
+    status: "ready",
+    canMessage: true,
+    tools: 0,
+    truncated: false,
+    history: { session: "reading", start: 0, end: 30, total: 30 },
+    messages: Array.from({ length: 30 }, (_, i) => ({
+      id: `read-${i}`,
+      role: "assistant",
+      text:
+        `Reading update ${i}. ` +
+        "This paragraph has a stable place in the conversation. ".repeat(6),
+    })),
+  };
+  let missing = false;
+  await page.route(`**/terminals/${terminal.id}/activity`, (route) =>
+    route.fulfill({
+      json: missing
+        ? {
+            kind: "claude",
+            status: "unavailable",
+            canMessage: false,
+            messages: [],
+            tools: 0,
+            truncated: false,
+          }
+        : activity,
+    }),
+  );
+  try {
+    await page.goto("/");
+    await page
+      .getByRole("button", { name: "Show Reading fixture", exact: true })
+      .click();
+    const pane = page.getByRole("region", {
+      name: "Reading fixture terminal",
+      exact: true,
+    });
+    const content = pane.locator(".agent-content");
+    await expect(content).toContainText("Reading update 29");
+    await page.evaluate(() => document.fonts.ready);
+    const anchor = content.locator('[data-message-id="read-15"]');
+    await anchor.evaluate((el) => {
+      const viewport = el.closest(".agent-content")!;
+      viewport.scrollTop +=
+        el.getBoundingClientRect().top -
+        viewport.getBoundingClientRect().top -
+        12;
+      viewport.dispatchEvent(new Event("scroll"));
+      (window as any).__readingAnchor = el;
+    });
+    const y = (await anchor.boundingBox())!.y;
+    activity.messages[0].text =
+      "Expanded earlier reply. " +
+      "Added detail above the reader. ".repeat(300);
+    await expect(content).toContainText("Expanded earlier reply.");
+    await expect
+      .poll(async () => Math.abs((await anchor.boundingBox())!.y - y))
+      .toBeLessThan(2);
+    missing = true;
+    await expect(
+      pane.getByRole("button", { name: "Send message", exact: true }),
+    ).toBeDisabled();
+    expect(
+      await anchor.evaluate((el) => el === (window as any).__readingAnchor),
+    ).toBe(true);
+    expect(Math.abs((await anchor.boundingBox())!.y - y)).toBeLessThan(2);
+    missing = false;
+    await expect(
+      pane.getByRole("button", { name: "Send message", exact: true }),
+    ).toBeEnabled();
+    expect(Math.abs((await anchor.boundingBox())!.y - y)).toBeLessThan(2);
+  } finally {
     await request.patch(`/api/workspace/terminals/${terminal.id}`, {
       data: { action: "stop" },
     });
