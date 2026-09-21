@@ -171,7 +171,11 @@ export class AgentView {
     this.setCreature(name);
   }
   private clearArrival(element: HTMLElement): void {
-    element.classList.remove("message-arrival", "reply-chunk-arrival");
+    element.classList.remove(
+      "message-arrival",
+      "reply-chunk-arrival",
+      "delivery-settling",
+    );
     element.style.removeProperty("--reveal-delay");
   }
   settleArrivals(): void {
@@ -379,7 +383,10 @@ export class AgentView {
       this.pending.at(-1)?.id || (last && (this.messageKeys.get(last) || last));
     this.pending.push({ id, text, afterId, state: "sending" });
     this.render();
-    this.scroller.latest();
+    // The composer has already collapsed. Commit its final scroll position in
+    // this same task, before the first paint of the bubble. A separate smooth
+    // scroll competes with the entrance and makes it appear halfway offscreen.
+    this.scroller.latest(false);
     return id;
   }
   finishMessage(id: string, sent: boolean): void {
@@ -599,8 +606,13 @@ export class AgentView {
       if (previews) nodes.push(previews);
     }
     for (const message of this.historyActivity ? [] : this.pending) {
-      const item = this.messageNode(message.id, "user", message.text, true);
-      item.classList.add("pending-message", message.state);
+      const item = this.messageNode(
+        message.id,
+        "user",
+        message.text,
+        true,
+        message.state,
+      );
       if (!item.querySelector(".pending-message-outline")) {
         const outline = document.createElementNS(
           "http://www.w3.org/2000/svg",
@@ -619,7 +631,8 @@ export class AgentView {
         status.setAttribute("role", "status");
         item.append(status);
       }
-      status.removeAttribute("aria-hidden");
+      if (status.hasAttribute("aria-hidden"))
+        status.removeAttribute("aria-hidden");
       const caption =
         message.state === "sending"
           ? "Sending…"
@@ -678,6 +691,7 @@ export class AgentView {
     role: string,
     text: string,
     animate: boolean,
+    delivery?: "sending" | "sent" | "failed",
   ): HTMLElement {
     let cached = this.messageNodes.get(id);
     if (!cached) {
@@ -688,12 +702,28 @@ export class AgentView {
       this.messageNodes.set(id, cached);
     }
     const item = cached.element;
-    item.classList.remove("pending-message", "sending", "sent", "failed");
-    // Retain the tiny status overlay so confirmation fades without collapsing
-    // the bubble or replaying its entrance animation.
-    item
-      .querySelector(".message-delivery")
-      ?.setAttribute("aria-hidden", "true");
+    // Apply only actual state changes. Removing and reapplying the pending
+    // classes on every poll resets CSS transitions/animated borders in WebKit.
+    const confirming = !delivery && item.classList.contains("pending-message");
+    if (confirming && item.classList.contains("message-arrival"))
+      item.classList.add("delivery-settling");
+    item.classList.toggle("pending-message", !!delivery);
+    for (const state of ["sending", "sent", "failed"])
+      item.classList.toggle(state, state === delivery);
+    const status = item.querySelector(".message-delivery");
+    if (status && !delivery) {
+      if (confirming) status.textContent = "Sent to terminal";
+      if (status.getAttribute("aria-hidden") !== "true")
+        status.setAttribute("aria-hidden", "true");
+    }
+    // The CLI may trim the submitted text. Keep the existing formatted body,
+    // image nodes and animation layer when the receipt is visually identical.
+    if (
+      cached.role === "user" &&
+      role === "user" &&
+      cached.text.trim() === text.trim()
+    )
+      cached.text = text;
     if (cached.text !== text || cached.role !== role) {
       if (role !== "user" && cached.reply) {
         cached.reply.update(text, animate);

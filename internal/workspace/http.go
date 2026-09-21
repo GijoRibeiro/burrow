@@ -35,6 +35,8 @@ func (m *Manager) Handler() http.Handler {
 	m.coordinationRoutes(mux)
 	m.teamRoutes(mux)
 	m.githubRoutes(mux)
+	m.pullRequestRoutes(mux)
+	m.usageRoutes(mux)
 	m.complaintRoutes(mux)
 	mux.HandleFunc("GET /api/workspace/servers", func(w http.ResponseWriter, r *http.Request) {
 		apps, err := m.hostedApps(r.Context())

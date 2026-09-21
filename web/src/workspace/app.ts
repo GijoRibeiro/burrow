@@ -1,3 +1,4 @@
+import { UsageMeters } from "./usage";
 import { settingsPage } from "./settings";
 import { applyBackground, background } from "./theme";
 import { productInboxButton } from "./complaints";
@@ -60,7 +61,6 @@ class WorkspaceApp {
   private canvas = el("main", "canvas");
   private status = el("span", "server-status", "Connecting…");
   private count = el("span", "workspace-count");
-  private footer = el("span", "footer-state");
   private alert = el("div", "alert");
   private search = el("input", "project-search");
   private initialized = false;
@@ -295,12 +295,9 @@ class WorkspaceApp {
     this.alert.setAttribute("role", "alert");
     this.alert.hidden = true;
     const bottom = el("footer", "workspace-footer");
-    const hint = el(
-      "span",
-      "footer-hint",
-      "Drag headers to swap · ⌘K choose terminals · ⌘↵ focus pane",
-    );
-    bottom.append(this.status, this.footer, hint);
+    const usage = new UsageMeters();
+    bottom.append(usage.element, this.status);
+    window.addEventListener("beforeunload", () => usage.dispose());
     body.append(toolbar, this.alert, this.canvas, bottom);
     root.append(this.sidebar, body);
     document.addEventListener("keydown", (e) => this.shortcut(e), true);
@@ -729,7 +726,7 @@ class WorkspaceApp {
     const running = this.state.terminals.filter(
       (t) => t.status === "running",
     ).length;
-    this.footer.textContent = `${this.state.projects.length} projects · ${running} running · ${this.state.terminals.filter((t) => t.status === "running" && !visible.has(t.id)).length} in background${this.zoomed ? " · focused view" : ""}`;
+    this.status.title = `${this.state.projects.length} projects · ${running} running · ${this.state.terminals.filter((t) => t.status === "running" && !visible.has(t.id)).length} in background${this.zoomed ? " · focused view" : ""}`;
     this.paintFocus();
     // Keep a small set of recent views warm. Their tmux sessions are independent
     // and remain alive even when an older view is evicted from this UI cache.

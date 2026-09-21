@@ -108,10 +108,10 @@ export class ConversationScroll {
   reflow() {
     this.restore(true);
   }
-  latest() {
+  latest(smooth = true) {
     this.stop();
     this.setFollowing(true);
-    this.restore(true, true);
+    this.restore(smooth, true);
   }
   showPage(edge: "start" | "end", following = false) {
     this.stop();

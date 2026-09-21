@@ -62,7 +62,11 @@ func (b *boundedOutput) Write(p []byte) (int, error) {
 	return n, nil
 }
 func githubCommand(ctx context.Context, output io.Writer, args ...string) error {
+	return githubCommandInDir(ctx, "", output, args...)
+}
+func githubCommandInDir(ctx context.Context, dir string, output io.Writer, args ...string) error {
 	cmd := exec.CommandContext(ctx, "gh", args...)
+	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GH_PROMPT_DISABLED=1", "GH_PAGER=cat", "NO_COLOR=1", "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never")
 	cmd.WaitDelay = time.Second
 	isolateCloneProcess(cmd)
