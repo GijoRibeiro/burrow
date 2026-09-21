@@ -14,13 +14,6 @@ type Attachment = {
 // Each pane owns its queue: switching agents cannot move screenshots to another draft.
 export class ComposerImages {
   readonly element = el("div", "composer-images");
-  readonly picker = button(
-    "Attach images",
-    () => this.input.click(),
-    "icon-button attach-images",
-    "+",
-  );
-  private input = el("input");
   private items: Attachment[] = [];
   private disposed = false;
   private detached = new Set<Attachment>();
@@ -31,18 +24,6 @@ export class ComposerImages {
   ) {
     this.element.hidden = true;
     this.element.setAttribute("aria-label", "Image attachments");
-    this.input.type = "file";
-    this.input.accept = "image/png,image/jpeg,image/gif";
-    this.input.multiple = true;
-    this.input.hidden = true;
-    this.picker.append(this.input);
-    // Avoid the hidden input's synthetic click reopening itself through its parent.
-    this.input.addEventListener("click", (event) => event.stopPropagation());
-    this.input.onchange = () => {
-      for (const file of Array.from(this.input.files || []))
-        void this.add(file);
-      this.input.value = "";
-    };
   }
   get busy(): boolean {
     return this.items.some((item) => !item.path);
