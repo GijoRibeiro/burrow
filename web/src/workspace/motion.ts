@@ -106,11 +106,80 @@ export function captureLayout(
           0.01
         )
           continue;
+        // Never stretch glyphs/canvas pixels to fake a size change. Geometry
+        // settles once; only position and opacity animate on the compositor.
+        const resized = Math.abs(sx - 1) + Math.abs(sy - 1) > 0.02;
         animate(pane, [
-          { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})` },
-          { transform: "none" },
+          {
+            transform: `translate(${dx}px, ${dy}px)`,
+            opacity: resized ? 0.35 : 1,
+          },
+          { transform: "none", opacity: 1 },
         ]);
       } else reveal(pane);
     }
   };
+}
+
+let sidebarTransition = 0;
+let sidebarTarget: boolean | undefined;
+let sidebarAnimations: Animation[] = [];
+
+// Reflow expensive terminal canvases once, behind a brief fade. Animating width
+// or margin sends a new PTY resize every frame and makes native TUIs flicker.
+export async function toggleSidebar(canvas: HTMLElement): Promise<void> {
+  const version = ++sidebarTransition;
+  const hidden = !(
+    sidebarTarget ?? document.body.classList.contains("sidebar-hidden")
+  );
+  sidebarTarget = hidden;
+  const sidebar = document.querySelector<HTMLElement>(".sidebar");
+  const surfaces = [canvas, sidebar].filter(
+    (node): node is HTMLElement => !!node,
+  );
+  const opacities = surfaces.map((node) => getComputedStyle(node).opacity);
+  for (const animation of sidebarAnimations) animation.cancel();
+  sidebarAnimations = [];
+  if (reduced()) {
+    document.body.classList.toggle("sidebar-hidden", hidden);
+    document.body.classList.remove("layout-transitioning");
+    sidebarTarget = undefined;
+    return;
+  }
+  document.body.classList.add("layout-transitioning");
+  try {
+    sidebarAnimations = surfaces.map((node, index) =>
+      node.animate([{ opacity: opacities[index] }, { opacity: 0 }], {
+        duration: 90,
+        easing: "ease-out",
+        fill: "forwards",
+      }),
+    );
+    await Promise.all(sidebarAnimations.map((animation) => animation.finished));
+    if (version !== sidebarTransition) return;
+    document.body.classList.toggle("sidebar-hidden", hidden);
+    // Resize observers fit xterm at final geometry before we reveal it.
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    );
+    if (version !== sidebarTransition) return;
+    for (const animation of sidebarAnimations) animation.cancel();
+    sidebarAnimations = surfaces
+      .filter((node) => getComputedStyle(node).visibility !== "hidden")
+      .map((node) =>
+        node.animate([{ opacity: 0 }, { opacity: 1 }], {
+          duration: 150,
+          easing: "ease-out",
+        }),
+      );
+    await Promise.all(sidebarAnimations.map((animation) => animation.finished));
+  } catch {
+    /* A repeated click takes ownership of the transition. */
+  } finally {
+    if (version === sidebarTransition) {
+      sidebarAnimations = [];
+      sidebarTarget = undefined;
+      document.body.classList.remove("layout-transitioning");
+    }
+  }
 }

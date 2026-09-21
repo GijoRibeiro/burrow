@@ -67,7 +67,7 @@ describe("agent progress", () => {
     const notice =
       view.element.querySelector<HTMLButtonElement>(".terminal-notice")!;
     expect(notice.hidden).toBe(false);
-    expect(notice.textContent).toContain("Provider needs attention");
+    expect(notice.textContent).toContain("Your agent needs attention");
   });
 });
 

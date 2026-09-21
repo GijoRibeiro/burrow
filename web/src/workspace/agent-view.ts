@@ -79,7 +79,7 @@ export class AgentView {
     "terminal-notice",
     "Input needed · Open terminal →",
   );
-  private notices = el("div", "agent-notices");
+  readonly notices = el("div", "agent-notices");
   private error = el("p", "agent-error");
   private launching = false;
   private progressKey = "";
@@ -150,6 +150,8 @@ export class AgentView {
     this.content.setAttribute("aria-label", "Agent conversation and output");
     this.error.setAttribute("role", "alert");
     this.notices.hidden = true;
+    this.notices.setAttribute("role", "status");
+    this.notices.setAttribute("aria-live", "polite");
     this.notices.append(this.notice, this.interruptButton);
     this.historyBar.hidden = true;
     this.historyBar.setAttribute("aria-label", "Conversation history");
@@ -221,7 +223,7 @@ export class AgentView {
     if (
       !activity.history &&
       this.liveActivity?.history &&
-      activity.kind === "claude"
+      (activity.kind === "claude" || activity.kind === "codex")
     ) {
       activity = {
         ...activity,
@@ -390,6 +392,7 @@ export class AgentView {
     this.render();
   }
   setScreen(screen: string, visible: string): void {
+    if (screen === this.screen && visible === this.visibleScreen) return;
     this.screen = screen;
     this.visibleScreen = visible;
     this.render();
@@ -419,6 +422,9 @@ export class AgentView {
     this.heading.classList.toggle("is-thinking", working);
     this.element.classList.toggle("needs-attention", attention);
     this.heading.classList.toggle("needs-attention", attention);
+    this.heading.classList.toggle("is-active", working);
+    this.heading.inert = !working;
+    this.heading.setAttribute("aria-hidden", String(!working));
     const progressKey = JSON.stringify([a?.messages, a?.tools, a?.tool]);
     if (!working || !this.wasWorking || progressKey !== this.progressKey)
       this.progressAt = Date.now();
@@ -435,11 +441,23 @@ export class AgentView {
         this.visibleScreen,
       );
     this.notice.hidden = !attention && !stalled && !providerError;
-    this.notice.textContent = attention
-      ? "Input needed · Open terminal →"
+    const noticeTitle = attention
+      ? "Your agent needs an answer"
       : providerError
-        ? "Provider needs attention · Open terminal →"
-        : "No new progress for a minute · Open terminal →";
+        ? "Your agent needs attention"
+        : "No new progress for a minute";
+    if (this.notice.dataset.title !== noticeTitle) {
+      this.notice.dataset.title = noticeTitle;
+      this.notice.replaceChildren(
+        el("strong", "terminal-notice-title", noticeTitle),
+        el(
+          "span",
+          "terminal-notice-action",
+          attention ? "Open terminal to answer →" : "Check terminal →",
+        ),
+      );
+    }
+    this.notices.classList.toggle("needs-reply", attention);
     this.interruptButton.hidden = !stalled;
     this.notices.hidden = this.notice.hidden && this.interruptButton.hidden;
     const label = !live
@@ -469,7 +487,8 @@ export class AgentView {
       a?.kind === "claude"
         ? `${this.name} · Claude${working && a.tool ? ` · ${a.tool}` : ""}${a.tools ? ` · ${a.tools} tool calls` : ""}`
         : `${this.name} · ${a?.kind === "codex" ? "Codex" : "Shell"}`;
-    const conversation = a?.kind === "claude" && a.messages.length > 0;
+    const conversation =
+      (a?.kind === "claude" || a?.kind === "codex") && a.messages.length > 0;
     const key = JSON.stringify([
       conversation
         ? [a.messages, a.truncated, a.history?.start, a.history?.end]
@@ -501,27 +520,17 @@ export class AgentView {
       }
     } else if (this.pending.length) {
       // The first outgoing turn is already useful content while the transcript loads.
-    } else if (a?.kind === "codex") {
-      nodes.push(
-        el(
-          "p",
-          "history-note",
-          "Codex runs in Terminal. Open it to send prompts, use slash commands, and see its full output.",
-        ),
-      );
-      nodes.push(button("Open Codex terminal", this.openTerminal, "secondary"));
-      if (this.screen.trim())
-        nodes.push(el("pre", "quiet-output", this.screen.trim()));
-    } else if (a?.kind === "claude") {
+    } else if (a?.kind === "claude" || a?.kind === "codex") {
+      const provider = a.kind === "codex" ? "Codex" : "Claude";
       nodes.push(
         el(
           "p",
           "history-note",
           a.status === "starting"
-            ? "Connecting to Claude…"
+            ? `Connecting to ${provider}…`
             : a.canMessage
-              ? "Claude is connected. Send a message below."
-              : "Open Terminal to complete Claude’s setup or respond to its prompt.",
+              ? `${provider} is connected. Send a message below.`
+              : `Open Terminal to complete ${provider}’s setup or respond to its prompt.`,
         ),
       );
       nodes.push(button("Open terminal", this.openTerminal, "secondary"));
@@ -692,7 +701,15 @@ export class AgentView {
         cached.reply =
           role === "user" ? undefined : new ReplyReveal(text, animate);
         item.replaceChildren(
-          el("span", "message-role", role === "user" ? "YOU" : "CLAUDE"),
+          el(
+            "span",
+            "message-role",
+            role === "user"
+              ? "YOU"
+              : this.activity?.kind === "codex"
+                ? "CODEX"
+                : "CLAUDE",
+          ),
           cached.reply?.element ||
             renderChatMarkdown(chatMessageText(this.terminalId, text)),
         );

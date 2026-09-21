@@ -77,3 +77,23 @@ describe("reply reveals", () => {
     expect(reply.element.textContent?.trim()).toBe("Short replacement.");
   });
 });
+
+it("does not repartition animated words when a streaming reply crosses a size threshold", () => {
+  const reply = new ReplyReveal("First words ", true);
+  const words = [...reply.element.querySelectorAll(".reply-chunk")];
+  reply.update("First words " + "more words ".repeat(150));
+  expect(reply.element.querySelectorAll(".reply-chunk")[0]).toBe(words[0]);
+  expect(reply.element.querySelectorAll(".reply-chunk")[1]).toBe(words[1]);
+});
+
+it("bounds animation spans when a short reply becomes very long", () => {
+  const reply = new ReplyReveal("First words ", true);
+  const first = reply.element.querySelector(".reply-chunk");
+  const text = "First words " + "more words ".repeat(10000);
+  reply.update(text);
+  expect(
+    reply.element.querySelectorAll(".reply-chunk").length,
+  ).toBeLessThanOrEqual(121);
+  expect(reply.element.querySelector(".reply-chunk")).toBe(first);
+  expect(reply.element.textContent?.trim()).toBe(text.trim());
+});

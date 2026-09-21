@@ -61,6 +61,6 @@ func (m *Manager) uploadImage(w http.ResponseWriter, r *http.Request) {
 		respond(w, nil, err)
 		return
 	}
-	path, err := filepath.Abs(file.Name())
+	path, err := canonical(file.Name())
 	respond(w, map[string]string{"path": path}, err)
 }

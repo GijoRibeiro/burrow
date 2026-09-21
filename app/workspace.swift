@@ -142,8 +142,8 @@ final class WorkspaceApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
         web.evaluateJavaScript("""
         (() => {
             const input = document.activeElement;
-            if (!input?.matches('.message-input')) return false;
-            input.dispatchEvent(new CustomEvent('workspace-paste-image', {detail: '\(base64)'}));
+            if (!input?.matches('.message-input, .xterm-helper-textarea')) return false;
+            input.dispatchEvent(new CustomEvent('workspace-paste-image', {detail: '\(base64)', bubbles: true}));
             return true;
         })()
         """) { handled, _ in

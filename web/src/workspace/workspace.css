@@ -374,8 +374,11 @@ a {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.sidebar-action-label { flex: 1; }
-.sidebar-action-badge, .sidebar-shortcut {
+.sidebar-action-label {
+  flex: 1;
+}
+.sidebar-action-badge,
+.sidebar-shortcut {
   flex: 0 0 auto;
   font: inherit;
   font-size: 10px;
@@ -387,7 +390,9 @@ a {
   background: #eae5ce10;
   color: var(--ink);
 }
-.sidebar-action-badge:empty { display: none; }
+.sidebar-action-badge:empty {
+  display: none;
+}
 .primary,
 .secondary,
 .danger {
@@ -3024,8 +3029,14 @@ textarea {
   border-radius: 5px;
   font-size: 12px;
 }
-.keep-awake-toggle:hover { background: var(--faint); }
-.keep-awake-status { margin-left: auto; color: var(--muted); font-size: 11px; }
+.keep-awake-toggle:hover {
+  background: var(--faint);
+}
+.keep-awake-status {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
 .keep-awake-track {
   width: 28px;
   height: 16px;
@@ -3040,17 +3051,29 @@ textarea {
   height: 12px;
   border-radius: 50%;
   background: var(--muted);
-  transition: transform 160ms ease, background 160ms ease;
+  transition:
+    transform 160ms ease,
+    background 160ms ease;
 }
-.keep-awake-toggle[aria-checked="true"] .keep-awake-track { background: var(--ink); }
+.keep-awake-toggle[aria-checked="true"] .keep-awake-track {
+  background: var(--ink);
+}
 .keep-awake-toggle[aria-checked="true"] .keep-awake-track::after {
   transform: translateX(12px);
   background: var(--bg);
 }
-.keep-awake-error { display: block; font-size: 12px; padding-top: 5px; }
-.keep-awake-error:empty { display: none; }
+.keep-awake-error {
+  display: block;
+  font-size: 12px;
+  padding-top: 5px;
+}
+.keep-awake-error:empty {
+  display: none;
+}
 @media (prefers-reduced-motion: reduce) {
-  .keep-awake-track::after { transition: none; }
+  .keep-awake-track::after {
+    transition: none;
+  }
 }
 
 /* The sidebar is about agents. Checkout management lives one level deeper. */
@@ -3112,4 +3135,88 @@ textarea {
 .checkout-detail-actions button {
   font-size: 11px;
   padding: 5px 8px;
+}
+
+/* Terminal mode is the real PTY: its native prompt is the only input. */
+.terminal-pane[data-view="terminal"] > .composer,
+.terminal-pane[data-view="terminal"] > .composer-images,
+.terminal-pane[data-view="terminal"] > .composer-activity {
+  display: none;
+}
+.terminal-paste-notice {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  z-index: 5;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel, #2e2f38);
+  color: var(--ink);
+  font-size: 13px;
+}
+.terminal-pane .composer-activity {
+  min-height: 0;
+  height: 0;
+  padding-block: 0;
+  border-top-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 160ms ease,
+    visibility 160ms;
+}
+.terminal-pane .composer-activity.is-active {
+  height: 48px;
+  padding-block: 6px;
+  border-top-width: 1px;
+  opacity: 1;
+  visibility: visible;
+}
+@media (prefers-reduced-motion: reduce) {
+  .terminal-pane .composer-activity {
+    transition: none;
+  }
+}
+
+/* Reflow once while obscured; pause decorative work during the transition. */
+body.layout-transitioning .sidebar,
+body.layout-transitioning .sidebar-toggle {
+  transition: none !important;
+}
+body.layout-transitioning .creature-frame,
+body.layout-transitioning .reply-chunk-arrival,
+body.layout-transitioning .message-arrival,
+body.layout-transitioning .pending-message-outline rect,
+body.layout-transitioning .team-wires path {
+  animation-play-state: paused !important;
+}
+
+.terminal-pane > .agent-notices {
+  margin: 10px 16px;
+  padding: 10px 12px;
+  border-color: color-mix(in srgb, var(--terminal-color) 38%, var(--line));
+  background: color-mix(in srgb, var(--terminal-color) 10%, var(--bg));
+}
+.terminal-pane > .agent-notices .terminal-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  padding: 4px;
+}
+.terminal-notice-title {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+.terminal-notice-action {
+  color: var(--terminal-color);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.terminal-pane[data-view="terminal"] > .agent-notices {
+  display: none;
 }

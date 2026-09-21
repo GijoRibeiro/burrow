@@ -1,7 +1,16 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page, type Locator } from "@playwright/test";
 import { mkdirSync, writeFileSync, appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
+async function setPaneView(pane: Locator, view: "agent" | "terminal") {
+  if ((await pane.getAttribute("data-view")) !== view)
+    await pane
+      .getByRole("button", {
+        name: view === "agent" ? "Agent view" : "Terminal view",
+        exact: true,
+      })
+      .click();
+}
 async function add(page: Page, project: string, terminal: string) {
   await page
     .getByRole("button", { name: "Add project", exact: true })
@@ -30,10 +39,14 @@ async function add(page: Page, project: string, terminal: string) {
       .getByRole("region", { name: `${terminal} terminal`, exact: true })
       .locator(".connection-state"),
   ).toHaveText("Live");
-  await page
-    .getByRole("region", { name: `${terminal} terminal`, exact: true })
-    .getByRole("button", { name: "Terminal view", exact: true })
-    .click();
+  const pane = page.getByRole("region", {
+    name: `${terminal} terminal`,
+    exact: true,
+  });
+  if ((await pane.getAttribute("data-view")) !== "terminal")
+    await pane
+      .getByRole("button", { name: "Terminal view", exact: true })
+      .click();
 }
 async function openWorktrees(page: Page, name: string) {
   await page
@@ -43,12 +56,22 @@ async function openWorktrees(page: Page, name: string) {
   return page.getByRole("dialog", { name: `${name} worktrees`, exact: true });
 }
 async function send(page: Page, name: string, command: string) {
-  const field = page.getByRole("textbox", {
-    name: new RegExp(`^(Message to|Command for) ${name}$`),
+  const pane = page.getByRole("region", {
+    name: `${name} terminal`,
     exact: true,
   });
-  await field.fill(command);
-  await field.press("Enter");
+  if (await pane.locator(".agent-empty").isVisible())
+    await setPaneView(pane, "terminal");
+  if ((await pane.getAttribute("data-view")) === "terminal") {
+    await pane.locator(".xterm-helper-textarea").focus();
+    await page.keyboard.insertText(command);
+    await page.keyboard.press("Enter");
+  } else {
+    const field = pane.locator(".message-input");
+    await expect(field).toHaveAttribute("aria-description", /^Enter to send/);
+    await field.fill(command);
+    await field.press("Enter");
+  }
 }
 function tmux(...args: string[]): string {
   return execFileSync(
@@ -93,7 +116,7 @@ test("real multi-project workspace: input, worktrees, resize, persistence and li
   await first.locator(".xterm-helper-textarea").focus();
   // Cycle all three panes in canvas order, including wrapping in both directions.
   for (const name of ["Agent", "Server", "Build"]) {
-    await page.keyboard.press("Tab");
+    await page.keyboard.press("Control+Tab");
     await expect(
       page
         .getByRole("region", { name: `${name} terminal`, exact: true })
@@ -101,7 +124,7 @@ test("real multi-project workspace: input, worktrees, resize, persistence and li
     ).toBeFocused();
   }
   for (const name of ["Server", "Agent", "Build"]) {
-    await page.keyboard.press("Shift+Tab");
+    await page.keyboard.press("Control+Shift+Tab");
     await expect(
       page
         .getByRole("region", { name: `${name} terminal`, exact: true })
@@ -174,6 +197,7 @@ test("real multi-project workspace: input, worktrees, resize, persistence and li
       JSON.parse(localStorage.getItem("cloovies.workspace.layout.v1")!).tree
         .ratio,
   );
+  await setPaneView(first, "agent");
   await page
     .getByRole("textbox", {
       name: /^(Message to|Command for) Build$/,
@@ -206,6 +230,7 @@ test("real multi-project workspace: input, worktrees, resize, persistence and li
   await expect
     .poll(() => capture(state.terminals[0].id))
     .toContain("HIDE-ready");
+  await setPaneView(first, "agent");
   await page
     .getByRole("textbox", {
       name: /^(Message to|Command for) Build$/,
@@ -324,15 +349,14 @@ test("connection recovery, terminal control keys, scrollback and exited-shell re
     .click();
   const pane = page.getByRole("region", { name: "Lifecycle terminal" });
   await expect(pane.locator(".connection-state")).toHaveText("Live");
-  await pane
-    .getByRole("button", { name: "Terminal view", exact: true })
-    .click();
+  await setPaneView(pane, "terminal");
   await pane.locator(".xterm-helper-textarea").focus();
   await page.keyboard.press("Control+k");
   await expect(page.getByRole("dialog")).toHaveCount(0);
   const draft = page.getByRole("textbox", {
     name: /^(Message to|Command for) Lifecycle$/,
   });
+  await setPaneView(pane, "agent");
   await draft.fill("unsent draft");
   const other = state.terminals.find(
     (t: { id: string }) => t.id !== terminal.id,
@@ -360,9 +384,7 @@ test("connection recovery, terminal control keys, scrollback and exited-shell re
       ),
     )
     .toContain("1");
-  await pane
-    .getByRole("button", { name: "Terminal view", exact: true })
-    .click();
+  await setPaneView(pane, "terminal");
   await pane.locator(".xterm-helper-textarea").focus();
   await page.keyboard.press("q");
   await expect
@@ -379,6 +401,7 @@ test("connection recovery, terminal control keys, scrollback and exited-shell re
   const input = page.getByRole("textbox", {
     name: /^(Message to|Command for) Lifecycle$/,
   });
+  await setPaneView(pane, "agent");
   await input.fill("printf 'RECOVER-%s\\n' 'ok'");
   await page.evaluate(() =>
     (window as any).__sockets.forEach((socket: WebSocket) => socket.close()),
@@ -389,7 +412,7 @@ test("connection recovery, terminal control keys, scrollback and exited-shell re
   await expect(pane.locator(".connection-state")).toHaveText("Live", {
     timeout: 10_000,
   });
-  await input.press("Enter");
+  await send(page, "Lifecycle", "printf 'RECOVER-%s\\n' 'ok'");
   await expect.poll(() => capture(terminal.id)).toContain("RECOVER-ok");
   await send(page, "Lifecycle", "exit");
   await expect(pane.locator(".connection-state")).toHaveText("Exited", {
@@ -529,16 +552,14 @@ test("retro companions and quiet conversations share the live terminal", async (
       exact: true,
     })
     .fill("draft stays with its creature");
-  await pane
-    .getByRole("button", { name: "Terminal view", exact: true })
-    .click();
+  await setPaneView(pane, "terminal");
   await expect(pane.locator(".terminal-host")).toBeVisible();
   await expect(pane.locator(".xterm-char-measure-element").first()).toHaveCSS(
     "font-family",
     '"Google Sans Code", monospace',
   );
   await expect(pane.locator(".agent-view")).toBeHidden();
-  await pane.getByRole("button", { name: "Agent view", exact: true }).click();
+  await setPaneView(pane, "agent");
   await expect(
     pane.getByRole("textbox", {
       name: /^(Message to|Command for) Companion$/,
@@ -590,11 +611,9 @@ test("retro companions and quiet conversations share the live terminal", async (
     .map(Number);
   expect(size[0]).toBeGreaterThan(20);
   expect(size[1]).toBeGreaterThan(5);
-  await pane
-    .getByRole("button", { name: "Terminal view", exact: true })
-    .click();
+  await setPaneView(pane, "terminal");
   await send(page, "Companion", "printf 'SWITCH-%s\\n' 'survived'");
-  await pane.getByRole("button", { name: "Agent view", exact: true }).click();
+  await setPaneView(pane, "agent");
   await expect.poll(() => capture(terminal.id)).toContain("SWITCH-survived");
   await expect(
     pane.getByRole("textbox", {
@@ -602,11 +621,9 @@ test("retro companions and quiet conversations share the live terminal", async (
       exact: true,
     }),
   ).toBeFocused();
-  await pane
-    .getByRole("button", { name: "Terminal view", exact: true })
-    .click();
+  await setPaneView(pane, "terminal");
   await send(page, "Companion", "printf 'Do you want to proceed?\\n'");
-  await pane.getByRole("button", { name: "Agent view", exact: true }).click();
+  await setPaneView(pane, "agent");
   await expect(
     pane.getByRole("button", { name: "Open terminal to respond" }),
   ).toBeVisible();
@@ -626,7 +643,7 @@ test("retro companions and quiet conversations share the live terminal", async (
       },
     }) + "\n",
   );
-  await pane.getByRole("button", { name: "Agent view", exact: true }).click();
+  await setPaneView(pane, "agent");
   await expect(pane.locator(".agent-status-label")).toHaveText(
     "Ready when you are",
   );
@@ -634,11 +651,9 @@ test("retro companions and quiet conversations share the live terminal", async (
     "hello, little world",
   );
   // Claude's settings footer may say Thinking... while the agent is idle.
-  await pane
-    .getByRole("button", { name: "Terminal view", exact: true })
-    .click();
+  await setPaneView(pane, "terminal");
   await send(page, "Companion", "printf 'Thinking...\\n'");
-  await pane.getByRole("button", { name: "Agent view", exact: true }).click();
+  await setPaneView(pane, "agent");
   await expect(pane.locator(".agent-status-label")).toHaveText(
     "Ready when you are",
   );
@@ -827,9 +842,7 @@ test("text controls, focused-terminal shortcuts and smooth layout transitions", 
   await input.focus();
   await page.keyboard.press(`${modifier}+=`);
   await expect(input).toHaveCSS("font-size", "15px");
-  await pane
-    .getByRole("button", { name: "Terminal view", exact: true })
-    .click();
+  await setPaneView(pane, "terminal");
   await pane.locator(".xterm-helper-textarea").focus();
   await page.keyboard.press(`${modifier}+=`);
   await expect(pane.locator(".xterm-char-measure-element").first()).toHaveCSS(
@@ -857,7 +870,7 @@ test("text controls, focused-terminal shortcuts and smooth layout transitions", 
   await expect(page.locator(".sidebar")).toBeVisible();
   await page.keyboard.press(`${modifier}+Enter`);
   await expect(page.locator(".canvas .terminal-pane")).toHaveCount(1);
-  await page.keyboard.press("Tab");
+  await page.keyboard.press("Control+Tab");
   await expect(page.locator(".canvas .terminal-pane")).toHaveCount(1);
   await expect(
     page
@@ -955,7 +968,7 @@ test("Codex launcher, YOLO restart, distinct identities and duplicate migration"
     exact: true,
   });
   await expect(
-    pane.getByRole("button", { name: "Terminal view", exact: true }),
+    pane.getByRole("button", { name: "Agent view", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
   await expect(pane.locator(".connection-state")).toHaveText("Live");
   const state = await (await request.get("/api/workspace")).json();
@@ -970,8 +983,8 @@ test("Codex launcher, YOLO restart, distinct identities and duplicate migration"
     .toContain("Codex received: Hello Codex");
   await expect(
     pane.getByRole("button", { name: "Agent view", exact: true }),
-  ).toBeHidden();
-  await expect(pane).toHaveAttribute("data-view", "terminal");
+  ).toBeVisible();
+  await expect(pane).toHaveAttribute("data-view", "agent");
   await pane.locator(".message-input").fill("Restored Codex draft");
   await page.addInitScript((id) => {
     const key = "cloovies.workspace.layout.v1";
@@ -980,7 +993,7 @@ test("Codex launcher, YOLO restart, distinct identities and duplicate migration"
     localStorage.setItem(key, JSON.stringify(saved));
   }, session.id);
   await page.reload();
-  await expect(pane).toHaveAttribute("data-view", "terminal");
+  await expect(pane).toHaveAttribute("data-view", "agent");
   await expect(pane.locator(".message-input")).toHaveValue(
     "Restored Codex draft",
   );
@@ -1035,8 +1048,9 @@ test("Codex launcher, YOLO restart, distinct identities and duplicate migration"
     };
   });
   expect(identities.colors).toBe(identities.count);
-  await pane
-    .getByRole("button", { name: "Customize terminal", exact: true })
+  await pane.locator(".pane-header").click({ button: "right" });
+  await page
+    .getByRole("menuitem", { name: "Customize terminal…", exact: true })
     .click();
   const availableCreatures = await page.locator(".creature-choice").count();
   await page
@@ -1163,9 +1177,7 @@ test("local image references show thumbnails and an accessible zoom view", async
   await page.screenshot({
     path: info.outputPath("image-preview-thumbnail.png"),
   });
-  await pane
-    .getByRole("button", { name: "Terminal view", exact: true })
-    .click();
+  await setPaneView(pane, "terminal");
   await expect(pane.locator(".xterm-screen")).toBeVisible();
   await expect(preview).not.toBeVisible();
 });
@@ -1530,7 +1542,7 @@ test("launch buttons share a row and wrap only in narrow panes", async ({
     name: "Wrapping launcher terminal",
     exact: true,
   });
-  await pane.getByRole("button", { name: "Agent view", exact: true }).click();
+  await setPaneView(pane, "agent");
   await page.setViewportSize({ width: 1440, height: 900 });
   const buttons = pane.locator(".agent-launch-actions button");
   await expect(buttons).toHaveCount(3);
@@ -2196,7 +2208,7 @@ test("chat hyperlinks open separately and code stays literal", async ({
     name: "Link reader terminal",
     exact: true,
   });
-  await pane.getByRole("button", { name: "Agent view", exact: true }).click();
+  await setPaneView(pane, "agent");
   await expect(pane.locator(".message-input")).toHaveAttribute(
     "aria-description",
     /^Enter to send/,
@@ -2225,7 +2237,7 @@ test("chat hyperlinks open separately and code stays literal", async ({
   await message.evaluate((el) => el.scrollIntoView({ block: "start" }));
   await expect
     .poll(() =>
-      message.evaluate((el) => el.getBoundingClientRect().width < 900),
+      message.evaluate((el) => el.getBoundingClientRect().width > 900),
     )
     .toBe(true);
   await page.screenshot({ path: info.outputPath("readable-chat.png") });
@@ -2372,7 +2384,9 @@ test("ordinary folders support agents and discover Git when it is added later", 
       exact: true,
     }),
   ).toBeVisible();
-  await expect(group.locator(".main-badge")).toHaveText("MAIN");
+  const checkouts = await openWorktrees(page, "Plain project");
+  await expect(checkouts.locator(".checkout-main")).toHaveText("Main checkout");
+  await checkouts.getByRole("button", { name: "Done", exact: true }).click();
   state = await (await page.request.get("/api/workspace")).json();
   expect(state.projects.find((p: any) => p.id === project.id).git).toBe(true);
   expect(
@@ -2687,7 +2701,7 @@ test("canvas creates agents directly in existing projects and arbitrary folders"
     name: "Second companion terminal",
     exact: true,
   });
-  await expect(codexPane).toHaveAttribute("data-view", "terminal");
+  await expect(codexPane).toHaveAttribute("data-view", "agent");
   await expect(
     page.getByRole("heading", { name: "Canvas", exact: true }),
   ).toBeVisible();
@@ -3049,9 +3063,7 @@ test("canvas keeps conversations warm, sends immediately, pins two agents and re
     .getByRole("button", { name: "Open Warm head on canvas", exact: true })
     .click();
   await expect.poll(distanceFromBottom).toBeLessThan(3);
-  await pane
-    .getByRole("button", { name: "Terminal view", exact: true })
-    .click();
+  await setPaneView(pane, "terminal");
   await pane.locator(".terminal-host").hover();
   await page.mouse.wheel(0, -450);
   const historyPosition = () =>
@@ -3074,7 +3086,7 @@ test("canvas keeps conversations warm, sends immediately, pins two agents and re
   await pane.locator(".xterm-helper-textarea").focus();
   await page.keyboard.press("q");
   await expect.poll(historyPosition).toBe("0");
-  await pane.getByRole("button", { name: "Agent view", exact: true }).click();
+  await setPaneView(pane, "agent");
   await page
     .getByRole("button", { name: "Keep agent open on canvas", exact: true })
     .click();
@@ -3474,7 +3486,7 @@ test("chat follows arrivals and reflow, pauses for history and resumes on send",
       name: "Following fixture terminal",
       exact: true,
     });
-    await pane.getByRole("button", { name: "Agent view", exact: true }).click();
+    await setPaneView(pane, "agent");
     const content = pane.locator(".agent-content");
     const gap = () =>
       content.evaluate(
@@ -3727,10 +3739,8 @@ test("chat follows arrivals and reflow, pauses for history and resumes on send",
     await expect(
       content.locator(".message-arrival, .reply-chunk-arrival"),
     ).toHaveCount(0);
-    await pane
-      .getByRole("button", { name: "Terminal view", exact: true })
-      .click();
-    await pane.getByRole("button", { name: "Agent view", exact: true }).click();
+    await setPaneView(pane, "terminal");
+    await setPaneView(pane, "agent");
     await expect.poll(gap).toBeLessThan(2);
     await expect(
       content.locator(".message-arrival, .reply-chunk-arrival"),
@@ -3869,9 +3879,6 @@ test("typing a single-line draft never collapses the input or resizes the termin
       name: "Stable typing fixture terminal",
       exact: true,
     });
-    await pane
-      .getByRole("button", { name: "Terminal view", exact: true })
-      .click();
     await expect(pane.locator(".connection-state")).toHaveText("Live");
     await page.evaluate(() => document.fonts.ready);
     await expect.poll(() => resizes.length).toBeGreaterThan(0);
@@ -4459,7 +4466,8 @@ test("sending is one smooth entrance with stable geometry through delayed acknow
       return probe;
     });
     await info.attach("send-frame-measurements", {
-      body: JSON.stringify(probe, null, 2), contentType: "application/json",
+      body: JSON.stringify(probe, null, 2),
+      contentType: "application/json",
     });
     expect(probe.starts).toBe(1);
     // WebKit reports tiny float rounding differences during translateY (<0.0001px).
@@ -4714,7 +4722,7 @@ test("chat slash commands open the real CLI without pending bubbles", async ({
       .toContain("Fixture command menu: /mcp");
     await expect(pane.locator(".xterm-helper-textarea")).toBeFocused();
     await expect(pane.locator(".pending-message")).toHaveCount(0);
-    await pane.getByRole("button", { name: "Agent view", exact: true }).click();
+    await setPaneView(pane, "agent");
     await input.fill("/control-remote");
     await expect(
       menu.getByRole("option", { name: "/remote-control", exact: true }),
@@ -4725,13 +4733,13 @@ test("chat slash commands open the real CLI without pending bubbles", async ({
     await expect
       .poll(() => capture(terminal.id))
       .toContain("Fixture command menu: /remote-control");
-    await pane.getByRole("button", { name: "Agent view", exact: true }).click();
+    await setPaneView(pane, "agent");
     await input.fill("/custom-command an argument");
     await input.press("Enter");
     await expect
       .poll(() => capture(terminal.id))
       .toContain("Fixture command menu: /custom-command an argument");
-    await pane.getByRole("button", { name: "Agent view", exact: true }).click();
+    await setPaneView(pane, "agent");
     await input.fill("/");
     await pane.screenshot({ path: info.outputPath("slash-command-menu.png") });
     await input.press("Escape");
@@ -4747,6 +4755,236 @@ test("chat slash commands open the real CLI without pending bubbles", async ({
       "Agent disconnected",
     );
     await expect(pane.locator(".pending-message")).toHaveCount(0);
+  } finally {
+    await request.patch(`/api/workspace/terminals/${terminal.id}`, {
+      data: { action: "stop" },
+    });
+  }
+});
+
+test("Codex chat mirrors the native session, images, toggle, idle activity and keyboard", async ({
+  page,
+  request,
+}, info) => {
+  const path = join(process.env.CLOOVIES_E2E_ROOT!, "CodexChat");
+  mkdirSync(path);
+  const project = await (
+    await request.post("/api/workspace/projects", {
+      data: { path, name: "Codex chat" },
+    })
+  ).json();
+  const sessions = [];
+  for (const name of ["Native Codex", "Other Codex"])
+    sessions.push(
+      await (
+        await request.post("/api/workspace/terminals", {
+          data: { projectId: project.id, path, name, program: "codex" },
+        })
+      ).json(),
+    );
+  try {
+    await page.goto("/");
+    await page
+      .getByRole("button", { name: "Show Native Codex", exact: true })
+      .click();
+    const pane = page.getByRole("region", {
+      name: "Native Codex terminal",
+      exact: true,
+    });
+    const input = pane.locator(".message-input");
+    await expect(input).toHaveAttribute("aria-description", /^Enter to send/);
+    await expect(pane.locator(".composer-activity")).toBeHidden();
+    await send(page, "Native Codex", "A message from chat");
+    await expect(pane.locator(".conversation-message.assistant")).toContainText(
+      "Codex received: A message from chat",
+      { timeout: 10000 },
+    );
+    await expect(pane.locator(".pending-message")).toHaveCount(0);
+    await expect(pane.locator(".message-role").last()).toHaveText("CODEX");
+    expect(capture(sessions[1].id)).not.toContain("A message from chat");
+    await expect(pane.locator(".composer-activity")).toBeHidden();
+    // Native host paste accepts real clipboard images, then reflects the CLI receipt.
+    const chatPng = await page.evaluate(() => {
+      const c = document.createElement("canvas");
+      c.width = c.height = 2;
+      return c.toDataURL().split(",")[1];
+    });
+    await input.evaluate(
+      (el, data) =>
+        el.dispatchEvent(
+          new CustomEvent("workspace-paste-image", { detail: data }),
+        ),
+      chatPng,
+    );
+    await expect(pane.locator(".composer-image")).toHaveCount(1);
+    await expect(input).toHaveAttribute("aria-description", /^Enter to send/);
+    await input.fill("Inspect my screenshot");
+    await input.press("Enter");
+    await expect(
+      pane.locator(".conversation-message.assistant").last(),
+    ).toContainText("1 native image(s)", { timeout: 10000 });
+    await expect(pane.locator(".pending-message")).toHaveCount(0);
+    await expect(
+      pane.locator(".conversation-message.user .image-preview"),
+    ).toHaveCount(1);
+    await expect(pane.locator(".agent-content")).not.toContainText(
+      "INJECTED ENVIRONMENT",
+    );
+    await expect(pane.locator(".agent-content")).not.toContainText(
+      "PRIVATE REASONING",
+    );
+    await input.fill("Saved chat draft");
+    const chatButton = pane.getByRole("button", {
+      name: "Agent view",
+      exact: true,
+    });
+    const terminalButton = pane.getByRole("button", {
+      name: "Terminal view",
+      exact: true,
+    });
+    await chatButton.click(); // Clicking the selected side must toggle too.
+    await expect(pane).toHaveAttribute("data-view", "terminal");
+    await expect(input).toBeHidden();
+    await expect(pane.locator(".composer-images")).toBeHidden();
+    await expect(pane.locator(".composer-activity")).toBeHidden();
+    await pane.locator(".xterm-helper-textarea").focus();
+    await page.keyboard.press("Tab");
+    await expect.poll(() => capture(sessions[0].id)).toContain("NATIVE TAB");
+    await send(page, "Native Codex", "Direct native prompt");
+    await expect
+      .poll(() => capture(sessions[0].id))
+      .toContain("Codex received: Direct native prompt");
+    await terminalButton.click();
+    await expect(pane).toHaveAttribute("data-view", "agent");
+    await expect(input).toHaveValue("Saved chat draft");
+    await expect(
+      pane.locator(".conversation-message.assistant").last(),
+    ).toContainText("Direct native prompt");
+    // Both halves act as one toggle without changing their visuals.
+    await terminalButton.click();
+    await expect(pane).toHaveAttribute("data-view", "terminal");
+    await terminalButton.click();
+    await expect(pane).toHaveAttribute("data-view", "agent");
+    await pane.screenshot({ path: info.outputPath("codex-chat.png") });
+    await input.fill("/mcp");
+    await input.press("Enter");
+    await expect(pane).toHaveAttribute("data-view", "terminal");
+    await expect
+      .poll(() => capture(sessions[0].id))
+      .toContain("Fixture command menu: /mcp");
+    await pane.screenshot({ path: info.outputPath("codex-native.png") });
+    const native = pane.locator(".xterm-helper-textarea");
+    const png = await page.evaluate(() => {
+      const c = document.createElement("canvas");
+      c.width = c.height = 2;
+      return c.toDataURL().split(",")[1];
+    });
+    await native.evaluate(
+      (el, data) =>
+        el.dispatchEvent(
+          new CustomEvent("workspace-paste-image", {
+            detail: data,
+            bubbles: true,
+          }),
+        ),
+      png,
+    );
+    await expect.poll(() => capture(sessions[0].id)).toContain("[Image #1]");
+    await send(page, "Native Codex", "Native attachment");
+    await expect
+      .poll(() => capture(sessions[0].id))
+      .toContain("Codex received: Native attachment · 1 native image(s)");
+  } finally {
+    for (const session of sessions)
+      await request.patch(`/api/workspace/terminals/${session.id}`, {
+        data: { action: "stop" },
+      });
+  }
+});
+
+test("sidebar motion fits terminals once and terminal questions stay beside the composer", async ({
+  page,
+  request,
+}, info) => {
+  const root = join(process.env.CLOOVIES_E2E_ROOT!, "MotionAudit");
+  mkdirSync(root);
+  const project = await (
+    await request.post("/api/workspace/projects", {
+      data: { path: root, name: "Motion audit" },
+    })
+  ).json();
+  const terminal = await (
+    await request.post("/api/workspace/terminals", {
+      data: {
+        projectId: project.id,
+        name: "Motion audit agent",
+        program: "claude",
+      },
+    })
+  ).json();
+  const resizes: unknown[] = [];
+  page.on("websocket", (socket) =>
+    socket.on("framesent", (event) => {
+      try {
+        const data = JSON.parse(String(event.payload));
+        if (data.type === "resize") resizes.push(data);
+      } catch {}
+    }),
+  );
+  try {
+    await page.goto("/");
+    await page
+      .getByRole("button", { name: "Show Motion audit agent", exact: true })
+      .click();
+    const pane = page.getByRole("region", {
+      name: "Motion audit agent terminal",
+      exact: true,
+    });
+    const input = pane.locator(".message-input");
+    await expect(input).toHaveAttribute("aria-description", /^Enter to send/);
+    await page.evaluate(() => document.fonts.ready);
+    await expect.poll(() => resizes.length).toBeGreaterThan(0);
+    const toggle = page.getByRole("button", {
+      name: "Toggle sidebar",
+      exact: true,
+    });
+    for (let i = 0; i < 2; i++) {
+      const count = resizes.length;
+      await toggle.click();
+      await expect(page.locator("body")).not.toHaveClass(
+        /layout-transitioning/,
+      );
+      expect(resizes.length - count).toBeLessThanOrEqual(2);
+    }
+    // Rapid reversal must never leave faded content or an inert transition class.
+    await toggle.evaluate((el) => {
+      (el as HTMLElement).click();
+      setTimeout(() => (el as HTMLElement).click(), 35);
+    });
+    await expect(page.locator("body")).not.toHaveClass(/layout-transitioning/);
+    await expect(page.locator(".canvas")).toHaveCSS("opacity", "1");
+    await expect(page.locator(".sidebar")).toBeVisible();
+    await send(
+      page,
+      "Motion audit agent",
+      "Do you want to allow this tool? Enter to confirm",
+    );
+    const notice = pane.locator(":scope > .agent-notices");
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText("Your agent needs an answer");
+    const bounds = await notice.boundingBox(),
+      composer = await input.boundingBox();
+    expect(composer!.y - bounds!.y - bounds!.height).toBeLessThan(100);
+    await pane.screenshot({
+      path: info.outputPath("terminal-question-card.png"),
+    });
+    await notice
+      .getByRole("button", { name: "Open terminal to respond" })
+      .click();
+    await expect(pane).toHaveAttribute("data-view", "terminal");
+    await expect(notice).toBeHidden();
+    await expect(input).toBeHidden();
+    await expect(pane.locator(".xterm-helper-textarea")).toBeFocused();
   } finally {
     await request.patch(`/api/workspace/terminals/${terminal.id}`, {
       data: { action: "stop" },

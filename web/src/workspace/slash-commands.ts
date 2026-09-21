@@ -12,6 +12,15 @@ const commands = [
   ["/help", "Explore available CLI commands"],
 ];
 
+const codexCommands = [
+  ["/model", "Choose a model"],
+  ["/mcp", "Inspect connected tools"],
+  ["/status", "Session and account status"],
+  ["/compact", "Summarize the conversation"],
+  ["/permissions", "Choose permissions"],
+  ["/resume", "Resume a previous session"],
+];
+
 export function isSlashCommand(text: string): boolean {
   return /^\/[a-z][\w:-]*(?:\s|$)/i.test(text.trim());
 }
@@ -22,11 +31,14 @@ export class SlashCommands {
   private selected = 0;
   private matches: string[][] = [];
   private dismissed = "";
-  constructor(private input: HTMLTextAreaElement) {
+  constructor(
+    private input: HTMLTextAreaElement,
+    private provider = "Claude",
+  ) {
     this.element.id = `commands-${crypto.randomUUID()}`;
     this.element.hidden = true;
     this.element.setAttribute("role", "listbox");
-    this.element.setAttribute("aria-label", "Claude commands");
+    this.element.setAttribute("aria-label", `${this.provider} commands`);
     input.setAttribute("aria-controls", this.element.id);
     input.setAttribute("aria-autocomplete", "list");
     input.addEventListener("input", () => {
@@ -92,7 +104,9 @@ export class SlashCommands {
       return;
     }
     const query = text.toLowerCase();
-    this.matches = commands.filter(
+    this.matches = (
+      this.provider === "Codex" ? codexCommands : commands
+    ).filter(
       ([name]) =>
         name.includes(query.slice(1)) ||
         (name === "/remote-control" &&
@@ -107,7 +121,7 @@ export class SlashCommands {
     const hint = el(
       "div",
       "composer-commands-hint",
-      "Claude commands · Choose, then Enter to run in Terminal",
+      `${this.provider} commands · Choose, then Enter to run in Terminal`,
     );
     hint.setAttribute("role", "presentation");
     this.element.append(hint);

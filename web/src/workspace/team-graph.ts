@@ -103,6 +103,11 @@ export class TeamGraph {
   private world = el("div", "team-world");
   private wires = svg("svg");
   private cards = el("div", "team-cards");
+  private cardCache = new Map<string, { key: string; element: HTMLElement }>();
+  private wireCache = new Map<
+    string,
+    { group: SVGElement; path: SVGElement; dots: SVGElement[] }
+  >();
   private summary = el("span", "team-overview");
   private notice = el("div", "team-notice");
   private zoomLabel = el("span", "team-zoom-label", "100%");
@@ -147,10 +152,7 @@ export class TeamGraph {
     }
     const header = el("div", "team-heading"),
       titles = el("div");
-    titles.append(
-      el("h2", "", "Canvas"),
-      this.summary,
-    );
+    titles.append(el("h2", "", "Canvas"), this.summary);
     const actions = el("div", "team-heading-actions");
     this.teamSelect.setAttribute("aria-label", "Team shown on canvas");
     this.teamSelect.onchange = () => {
@@ -381,7 +383,26 @@ export class TeamGraph {
       (t) => shown.has(t.id) && t.role === "head",
     ).length;
     this.summary.textContent = `${headCount} ${headCount === 1 ? "head" : "heads"} · ${working} working${waiting ? ` · ${waiting} need an answer` : ""}`;
-    this.cards.replaceChildren(...this.nodes.map((node) => this.card(node)));
+    const desired = this.nodes.map((node) => {
+      const key = JSON.stringify([
+        node,
+        this.ctx.color(node.session?.id || node.parent || node.id),
+        this.ctx.creature(node.session?.id || node.id),
+        state.projects.find((p) => p.id === node.session?.projectId)?.name,
+      ]);
+      const cached = this.cardCache.get(node.id);
+      if (cached?.key === key) return cached.element;
+      const element = this.card(node);
+      this.cardCache.set(node.id, { key, element });
+      return element;
+    });
+    for (const [index, card] of desired.entries())
+      if (this.cards.children[index] !== card)
+        this.cards.insertBefore(card, this.cards.children[index] || null);
+    for (const card of [...this.cards.children])
+      if (!desired.includes(card as HTMLElement)) card.remove();
+    for (const id of this.cardCache.keys())
+      if (!shown.has(id)) this.cardCache.delete(id);
     if (!this.nodes.length) {
       const empty = el("div", "team-empty");
       const pets = el("div", "team-empty-pets");
@@ -612,22 +633,41 @@ export class TeamGraph {
       const point = this.positions[card.dataset.nodeId!];
       card.style.transform = `translate(${point.x}px, ${point.y}px)`;
     }
-    this.wires.replaceChildren();
+    const dimensions = new Map(
+      [...this.cards.querySelectorAll<HTMLElement>(".team-node")].map(
+        (card) => [
+          card.dataset.nodeId!,
+          {
+            ...this.positions[card.dataset.nodeId!],
+            width: card.offsetWidth || 288,
+            height: card.offsetHeight || 172,
+          },
+        ],
+      ),
+    );
+    const retained = new Set<string>();
     for (const node of this.nodes) {
-      if (!node.parent || !this.nodes.some((n) => n.id === node.parent))
+      if (
+        !node.parent ||
+        !dimensions.has(node.parent) ||
+        !dimensions.has(node.id)
+      )
         continue;
-      const bounds = (id: string) => {
-        const card = [
-          ...this.cards.querySelectorAll<HTMLElement>(".team-node"),
-        ].find((el) => el.dataset.nodeId === id);
-        return {
-          ...this.positions[id],
-          width: card?.offsetWidth || 288,
-          height: card?.offsetHeight || 172,
-        };
-      };
+      retained.add(node.id);
+      const bounds = (id: string) => dimensions.get(id)!;
       const connection = graphConnection(bounds(node.parent), bounds(node.id));
-      const path = svg("path");
+      let wire = this.wireCache.get(node.id);
+      if (!wire) {
+        wire = {
+          group: svg("g"),
+          path: svg("path"),
+          dots: [svg("circle"), svg("circle")],
+        };
+        wire.group.append(wire.path, ...wire.dots);
+        this.wireCache.set(node.id, wire);
+        this.wires.append(wire.group);
+      }
+      const path = wire.path;
       path.setAttribute("d", connection.path);
       path.style.setProperty(
         "--wire-color",
@@ -639,15 +679,21 @@ export class TeamGraph {
         node.session?.liveStatus === "working" &&
           node.session?.status === "running",
       );
-      this.wires.append(path);
-      for (const point of [connection.start, connection.end]) {
-        const dot = svg("circle");
+      for (const [index, point] of [
+        connection.start,
+        connection.end,
+      ].entries()) {
+        const dot = wire.dots[index];
         dot.setAttribute("cx", String(point.x));
         dot.setAttribute("cy", String(point.y));
         dot.setAttribute("r", "4");
-        this.wires.append(dot);
       }
     }
+    for (const [id, wire] of this.wireCache)
+      if (!retained.has(id)) {
+        wire.group.remove();
+        this.wireCache.delete(id);
+      }
   }
   private startDrag(e: PointerEvent): void {
     // macOS Control-click opens the context menu; capturing it would retarget

@@ -15,7 +15,7 @@ import { keepAwakeControl } from "./keep-awake";
 import { sidebarAction } from "./sidebar-controls";
 import { worktreeDialog, issuePrompt } from "./worktree-dialog";
 import "./workspace.css";
-import { captureLayout } from "./motion";
+import { captureLayout, toggleSidebar } from "./motion";
 import { nextColor, nextCreature } from "./appearance";
 import { renderProjectList } from "./sidebar";
 import { renderSplitTree } from "./split-view";
@@ -143,17 +143,41 @@ class WorkspaceApp {
     const sideBottom = el("div", "sidebar-bottom");
     const createActions = el("div", "sidebar-create-actions");
     createActions.append(
-      button("Add project", () => this.addProject(), "secondary", "+ Add project"),
+      button(
+        "Add project",
+        () => this.addProject(),
+        "secondary",
+        "+ Add project",
+      ),
       this.startHeadButton,
     );
     const shortcuts = el("kbd", "sidebar-shortcut", "⌘?");
     sideBottom.append(
       createActions,
-      sidebarAction(button("Tasks and inbox", () => coordinationDialog(this.coordinationContext())), "tasks", "Tasks and inbox"),
+      sidebarAction(
+        button("Tasks and inbox", () =>
+          coordinationDialog(this.coordinationContext()),
+        ),
+        "tasks",
+        "Tasks and inbox",
+      ),
       productInboxButton(),
-      sidebarAction(button("Connect Linear for agents", linearConnectionDialog), "link", "Linear connection"),
-      sidebarAction(button("Setup and tools", setupDialog), "tools", "Setup and tools"),
-      sidebarAction(button("Keyboard shortcuts", () => this.help()), "keyboard", "Keyboard shortcuts", shortcuts),
+      sidebarAction(
+        button("Connect Linear for agents", linearConnectionDialog),
+        "link",
+        "Linear connection",
+      ),
+      sidebarAction(
+        button("Setup and tools", setupDialog),
+        "tools",
+        "Setup and tools",
+      ),
+      sidebarAction(
+        button("Keyboard shortcuts", () => this.help()),
+        "keyboard",
+        "Keyboard shortcuts",
+        shortcuts,
+      ),
       keepAwakeControl(),
     );
     this.sidebar.append(
@@ -179,16 +203,46 @@ class WorkspaceApp {
     );
     const tools = el("div", "toolbar-actions");
     const presets = el("div", "layout-presets");
-    presets.append(
-      button(
-        "Arrange in columns",
-        () => this.preset("columns"),
+    for (const layout of ["columns", "rows", "grid"] as const) {
+      const control = button(
+        `Arrange in ${layout}`,
+        () => this.preset(layout),
         "icon-button",
-        "▥",
-      ),
-      button("Arrange in rows", () => this.preset("rows"), "icon-button", "▤"),
-      button("Arrange in grid", () => this.preset("grid"), "icon-button", "▦"),
-    );
+        "",
+      );
+      const icon = document.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "svg",
+      );
+      icon.setAttribute("viewBox", "0 0 24 24");
+      icon.setAttribute("width", "20");
+      icon.setAttribute("height", "20");
+      icon.setAttribute("fill", "none");
+      icon.setAttribute("stroke", "currentColor");
+      icon.setAttribute("stroke-width", "1.3");
+      icon.setAttribute("aria-hidden", "true");
+      const outline = document.createElementNS(icon.namespaceURI, "rect");
+      for (const [key, value] of Object.entries({
+        x: "3",
+        y: "3",
+        width: "18",
+        height: "18",
+        rx: "1",
+      }))
+        outline.setAttribute(key, value);
+      const lines = document.createElementNS(icon.namespaceURI, "path");
+      lines.setAttribute(
+        "d",
+        layout === "columns"
+          ? "M9 3v18M15 3v18"
+          : layout === "rows"
+            ? "M3 9h18M3 15h18"
+            : "M12 3v18M3 12h18",
+      );
+      icon.append(outline, lines);
+      control.append(icon);
+      presets.append(control);
+    }
     tools.append(
       presets,
       button(
@@ -404,10 +458,7 @@ class WorkspaceApp {
           ? appearance.creature
           : nextCreature(names);
       this.appearances[terminal.id] = {
-        view:
-          terminal.program === "codex"
-            ? "terminal"
-            : appearance?.view || "agent",
+        view: appearance?.view || "agent",
         color,
         creature: name,
       };
@@ -1183,7 +1234,7 @@ class WorkspaceApp {
         if (issue && values.program !== "shell")
           this.drafts[t.id] = issuePrompt(issue);
         this.appearances[t.id].view =
-          values.program === "claude" ? "agent" : "terminal";
+          values.program === "shell" ? "terminal" : "agent";
         this.show(t.id, target, axis);
       },
     );
@@ -1333,14 +1384,14 @@ class WorkspaceApp {
   private help(): void {
     dialog(
       "Your workspace, from the keyboard",
-      "Tab / Shift+Tab: next / previous pane · ⌘K: choose terminals · ⌘⇧N: new terminal · ⌘B: sidebar · ⌘Enter: focus pane · ⌘1–9: select pane · ⌘+/−: text size · ⌘0: reset text size · ⌘?: shortcuts. On Linux use Ctrl+Shift. Drag headers to swap terminals. Drag a divider to resize; double-click to balance it. Scroll in a terminal to browse history; press Q to return to the prompt. Hold Shift while dragging to select text, then ⌘C to copy. Shift+Enter adds a line to a message.",
+      "Tab / Shift+Tab in chat, Ctrl+Tab / Ctrl+Shift+Tab anywhere: next / previous pane · ⌘K: choose terminals · ⌘⇧N: new terminal · ⌘B: sidebar · ⌘Enter: focus pane · ⌘1–9: select pane · ⌘+/−: text size · ⌘0: reset text size · ⌘?: shortcuts. On Linux use Ctrl+Shift. Drag headers to swap terminals. Drag a divider to resize; double-click to balance it. Scroll in a terminal to browse history; press Q to return to the prompt. Hold Shift while dragging to select text, then ⌘C to copy. Shift+Enter adds a line to a message.",
       [],
       "Got it",
       async () => {},
     );
   }
   private toggleSidebar(): void {
-    document.body.classList.toggle("sidebar-hidden");
+    void toggleSidebar(this.canvas);
   }
   private focusPane(id: string): void {
     if (this.view === "team") {
@@ -1372,7 +1423,11 @@ class WorkspaceApp {
   private shortcut(e: KeyboardEvent): void {
     if (e.isComposing || document.querySelector('dialog[open], [role="menu"]'))
       return;
-    if (e.key === "Tab" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    // Native CLIs own Tab and Shift+Tab for completion, menus and modes.
+    // Ctrl+Tab remains an explicit pane switch when the terminal has focus.
+    if (e.key === "Tab" && !e.metaKey && !e.altKey) {
+      if (!e.ctrlKey && (e.target as HTMLElement)?.closest(".terminal-host"))
+        return;
       const order =
         this.view === "team"
           ? this.state.terminals

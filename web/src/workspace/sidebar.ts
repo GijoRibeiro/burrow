@@ -32,8 +32,16 @@ export interface SidebarContext {
   restartTerminal(id: string): void;
   focusTerminal(id: string): void;
 }
+const projectCache = new WeakMap<
+  HTMLElement,
+  Map<string, { key: string; element: HTMLElement }>
+>();
 export function renderProjectList(ctx: SidebarContext): void {
-  ctx.projects.replaceChildren();
+  const cached =
+    projectCache.get(ctx.projects) ||
+    new Map<string, { key: string; element: HTMLElement }>();
+  projectCache.set(ctx.projects, cached);
+  const desired: HTMLElement[] = [];
   const filter = ctx.search.value.toLowerCase();
   const visible = ctx.visible || new Set(ids(ctx.tree));
   for (const p of ctx.state.projects) {
@@ -58,6 +66,31 @@ export function renderProjectList(ctx: SidebarContext): void {
         .includes(filter)
     )
       continue;
+    const key = JSON.stringify([
+      p,
+      terminals.map(({ liveStatus, ...rest }) => rest),
+      ctx.state.tasks,
+      ctx.onlyActive,
+      filter,
+      [...visible],
+      ctx.selectedPath,
+      ctx.collapsed.has(p.id),
+      terminals.map((t) => [ctx.creatureName(t.id), ctx.terminalColor(t.id)]),
+    ]);
+    const previous = cached.get(p.id);
+    if (previous?.key === key) {
+      for (const t of terminals) {
+        const row = previous.element.querySelector<HTMLElement>(
+          `[data-session-id="${t.id}"]`,
+        );
+        row?.classList.toggle("active", ctx.active === t.id);
+        row
+          ?.querySelector(".session-creature")
+          ?.classList.toggle("working", t.liveStatus === "working");
+      }
+      desired.push(previous.element);
+      continue;
+    }
     const group = el("section", "project-group");
 
     const body = el("div", "project-content");
@@ -73,6 +106,7 @@ export function renderProjectList(ctx: SidebarContext): void {
         ctx.collapsed.has(p.id)
           ? ctx.collapsed.delete(p.id)
           : ctx.collapsed.add(p.id);
+        cached.delete(p.id);
         const expanded = !ctx.collapsed.has(p.id);
         group.classList.toggle("collapsed", !expanded);
         content.inert = !expanded;
@@ -181,8 +215,18 @@ export function renderProjectList(ctx: SidebarContext): void {
           ),
         );
     }
-    ctx.projects.append(group);
+    cached.set(p.id, { key, element: group });
+    desired.push(group);
   }
+  // Keep connected rows in place: restarting their DOM also restarts sprites.
+  for (const [index, element] of desired.entries()) {
+    if (ctx.projects.children[index] !== element)
+      ctx.projects.insertBefore(element, ctx.projects.children[index] || null);
+  }
+  for (const element of [...ctx.projects.children])
+    if (!desired.includes(element as HTMLElement)) element.remove();
+  for (const id of cached.keys())
+    if (!ctx.state.projects.some((p) => p.id === id)) cached.delete(id);
   if (!ctx.state.projects.length)
     ctx.projects.append(
       el(
