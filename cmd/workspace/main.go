@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -38,6 +40,7 @@ func main() {
 		log.Fatal(err)
 	}
 	defer m.CloseClones()
+	m.SetInstaller(cloovies.EmbeddedInstaller)
 	if err := m.ConfigureAgentRuntime(fmt.Sprintf("http://127.0.0.1:%d", *port)); err != nil {
 		log.Fatal(err)
 	}
@@ -57,6 +60,22 @@ func main() {
 	srv := &http.Server{Addr: fmt.Sprintf("127.0.0.1:%d", *port), Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	m.OnShutdown(stop)
+	// The native app passes its own PID. When it is gone (crash, force quit),
+	// exit so a later launch never adopts an orphaned, possibly stale server.
+	// tmux keeps the terminals either way.
+	if parent, err := strconv.Atoi(os.Getenv("CLOOVIES_PARENT_PID")); err == nil && parent > 1 {
+		go func() {
+			for {
+				time.Sleep(2 * time.Second)
+				if os.Getppid() != parent || syscall.Kill(parent, 0) != nil {
+					log.Printf("parent process %d is gone; stopping", parent)
+					stop()
+					return
+				}
+			}
+		}()
+	}
 	m.StartComplaintMonitor(ctx)
 	defer func() { stop(); m.WaitComplaintShutdown() }()
 	go func() {
@@ -65,8 +84,16 @@ func main() {
 		defer cancel()
 		srv.Shutdown(timeout)
 	}()
-	log.Printf("Cloovies workspace at http://%s", srv.Addr)
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	// Bind before announcing readiness, and fail loudly: a silent zero exit on a
+	// busy port left the native app waiting for a server that never came.
+	listener, err := net.Listen("tcp", srv.Addr)
+	if err != nil {
+		log.Printf("cannot listen on %s: %v (is another Cloovies or service using this port?)", srv.Addr, err)
+		os.Exit(1)
+	}
+	log.Printf("Cloovies workspace %s at http://%s", workspace.Version(), srv.Addr)
+	if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
 		log.Print(err)
+		os.Exit(1)
 	}
 }

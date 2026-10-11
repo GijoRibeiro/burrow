@@ -84,6 +84,7 @@ func (m *Manager) codexActivity(t Terminal, panePID int, paneID string, query co
 	a.CanMessage = err == nil && len(f) == 2 && f[0] != "0" && f[0] != "-1" && f[0] == f[1]
 	a.paneID = paneID
 	a.Status = "ready"
+	m.rememberSession(t.ID, thread)
 	if path != "" && codexRolloutThread(path) == thread {
 		if history, err := m.readConversationPage(t.ID, path, query); err == nil {
 			history.Kind = "codex"

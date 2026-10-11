@@ -141,6 +141,7 @@ func (m *Manager) activity(id string, query conversationQuery) (a Activity, err 
 		return a, nil
 	}
 	a.Kind = "claude"
+	m.rememberSession(t.ID, session.SessionID)
 	// A background Claude process must not make an idle shell accept chat.
 	foreground := false
 	groups, err := command("", "ps", "-o", "pgid=,tpgid=", "-p", strconv.Itoa(session.PID))

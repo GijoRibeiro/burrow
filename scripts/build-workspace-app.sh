@@ -1,9 +1,15 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
+# VERSION is the single source of truth: it is linked into the Go daemon
+# (reported by /api/workspace/health) and stamped into Info.plist, so the
+# app can tell a stale daemon from an older install apart from its own.
+VERSION=$(tr -d '[:space:]' < VERSION)
+BUILD_NUMBER=$(git rev-list --count HEAD 2>/dev/null || echo 40)
+LDFLAGS="-X github.com/gijo/cloovies/internal/workspace.buildVersion=$VERSION"
 go run -buildvcs=false ./packaging/macos/icon/
 (cd web && npm ci && npm run build)
-go build -buildvcs=false -o bin/cloovies-workspace ./cmd/workspace
+go build -buildvcs=false -ldflags "$LDFLAGS" -o bin/cloovies-workspace ./cmd/workspace
 stage=$(mktemp -d /tmp/cloovies-app.XXXXXX)
 trap 'rm -rf "$stage"' EXIT
 bundle="$stage/Cloovies.app"
@@ -17,12 +23,12 @@ cp app/setup/install.command "$bundle/Contents/Resources/Setup/"
 iconutil -c icns build/macos/icon.iconset -o "$bundle/Contents/Resources/AppIcon.icns"
 for architecture in arm64 x86_64; do
   case "$architecture" in arm64) go_arch=arm64 ;; x86_64) go_arch=amd64 ;; esac
-  GOOS=darwin GOARCH="$go_arch" go build -buildvcs=false -o "$stage/server-$architecture" ./cmd/workspace
+  GOOS=darwin GOARCH="$go_arch" go build -buildvcs=false -ldflags "$LDFLAGS" -o "$stage/server-$architecture" ./cmd/workspace
   swiftc app/workspace.swift app/keep-awake.swift -o "$stage/app-$architecture" -framework Cocoa -framework WebKit -framework IOKit -target "$architecture-apple-macos13.0"
 done
 lipo -create "$stage/server-arm64" "$stage/server-x86_64" -output "$bundle/Contents/MacOS/cloovies-workspace"
 lipo -create "$stage/app-arm64" "$stage/app-x86_64" -output "$bundle/Contents/MacOS/Cloovies"
-cat > "$bundle/Contents/Info.plist" <<'PLIST'
+cat > "$bundle/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -30,8 +36,8 @@ cat > "$bundle/Contents/Info.plist" <<'PLIST'
 <key>CFBundleName</key><string>Cloovies</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundleIdentifier</key><string>com.cloovies.workspace</string>
-<key>CFBundleVersion</key><string>36</string>
-<key>CFBundleShortVersionString</key><string>0.6.24</string>
+<key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
+<key>CFBundleShortVersionString</key><string>$VERSION</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>NSHighResolutionCapable</key><true/>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
@@ -43,4 +49,4 @@ codesign --force --sign - "$bundle/Contents/MacOS/cloovies-workspace"
 codesign --force --sign - "$bundle"
 mkdir -p build/macos
 ditto "$bundle" build/macos/Cloovies.app
-printf 'Built %s/build/macos/Cloovies.app\n' "$PWD"
+printf 'Built %s/build/macos/Cloovies.app (version %s, build %s)\n' "$PWD" "$VERSION" "$BUILD_NUMBER"

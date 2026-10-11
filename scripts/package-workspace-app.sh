@@ -11,9 +11,16 @@ codesign --force --sign "${CLOOVIES_SIGN_IDENTITY:--}" "$stage/Cloovies.app/Cont
 codesign --force --sign "${CLOOVIES_SIGN_IDENTITY:--}" "$stage/Cloovies.app"
 codesign --verify --deep --strict "$stage/Cloovies.app"
 mkdir -p build/release
-release_zip="$PWD/build/release/Cloovies-mac-universal.zip"
-/usr/bin/ditto -c -k --norsrc --keepParent "$stage/Cloovies.app" build/release/Cloovies-mac-universal.zip
+version=$(tr -d '[:space:]' < VERSION)
+versioned="Cloovies-$version-mac-universal.zip"
+release_zip="$PWD/build/release/$versioned"
+rm -f "$release_zip" "$release_zip.sha256"
+/usr/bin/ditto -c -k --norsrc --keepParent "$stage/Cloovies.app" "$release_zip"
 # Include setup instructions beside the app in the archive.
 (cd "$stage" && /usr/bin/zip -q "$release_zip" READ-ME-FIRST.md)
-(cd build/release && shasum -a 256 Cloovies-mac-universal.zip > Cloovies-mac-universal.zip.sha256)
-printf 'Share build/release/Cloovies-mac-universal.zip\n'
+# The unversioned name stays valid for docs and existing links.
+(cd build/release && rm -f Cloovies-mac-universal.zip Cloovies-mac-universal.zip.sha256 \
+  && cp "$versioned" Cloovies-mac-universal.zip \
+  && shasum -a 256 "$versioned" Cloovies-mac-universal.zip > "$versioned.sha256" \
+  && cp "$versioned.sha256" Cloovies-mac-universal.zip.sha256)
+printf 'Share build/release/%s (also copied to build/release/Cloovies-mac-universal.zip)\n' "$versioned"

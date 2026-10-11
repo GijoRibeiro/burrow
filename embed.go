@@ -11,3 +11,9 @@ var EmbeddedWeb embed.FS
 //
 //go:embed web/assets/sprites
 var EmbeddedSprites embed.FS
+
+// The first-run installer is embedded so the server can run it on a PTY inside
+// the app, with visible progress, instead of bouncing to Terminal.app.
+//
+//go:embed app/setup/install.command
+var EmbeddedInstaller []byte

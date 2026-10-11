@@ -44,6 +44,9 @@ type Terminal struct {
 	Goal       string    `json:"goal,omitempty"`
 	TaskID     string    `json:"taskId,omitempty"`
 	Program    string    `json:"program,omitempty"`
+	// SessionID is the agent's own conversation identity (Claude session or
+	// Codex thread), discovered from the live pane so a restart can resume it.
+	SessionID  string    `json:"sessionId,omitempty"`
 	ID         string    `json:"id"`
 	ProjectID  string    `json:"projectId"`
 	Path       string    `json:"path"`
@@ -64,6 +67,9 @@ type State struct {
 	TmuxAvailable  bool                            `json:"tmuxAvailable"`
 }
 type Manager struct {
+	lifecycle     sync.Map // terminal ID -> *sync.Mutex; serialize start/stop/restart
+	shutdown      func()
+	installer     []byte
 	usage         usageCache
 	pullRequests  pullRequestCache
 	messageLocks  sync.Map // terminal ID -> *sync.Mutex; serialize native paste and submit
@@ -252,7 +258,13 @@ func (m *Manager) Snapshot() State {
 			}
 		}
 	}
-	annotateLiveAgents(s.Terminals, panePIDs)
+	sessions := annotateLiveAgents(s.Terminals, panePIDs)
+	m.rememberSessions(sessions)
+	for i := range s.Terminals {
+		if sessionID, ok := sessions[s.Terminals[i].ID]; ok {
+			s.Terminals[i].SessionID = sessionID
+		}
+	}
 	for i := range s.Projects {
 		p := &s.Projects[i]
 		p.Worktrees, p.Git, err = projectCheckouts(p.Path)
@@ -586,4 +598,32 @@ func (m *Manager) RemoveProject(projectID string) error {
 		return err
 	}
 	return nil
+}
+
+// OnShutdown registers the callback used by POST /api/workspace/shutdown so a
+// newer app build can retire a stale daemon instead of adopting it.
+func (m *Manager) OnShutdown(stop func()) { m.shutdown = stop }
+
+// rememberSessions persists newly discovered agent conversation identities.
+// It saves only when something changed, so periodic snapshots stay cheap.
+func (m *Manager) rememberSessions(found map[string]string) {
+	if len(found) == 0 {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	changed := false
+	for i := range m.state.Terminals {
+		t := &m.state.Terminals[i]
+		if sessionID, ok := found[t.ID]; ok && sessionID != "" && sessionID != t.SessionID {
+			t.SessionID = sessionID
+			changed = true
+		}
+	}
+	if changed {
+		m.save()
+	}
+}
+func (m *Manager) rememberSession(id, sessionID string) {
+	m.rememberSessions(map[string]string{id: sessionID})
 }

@@ -315,8 +315,29 @@ class WorkspaceApp {
     this.refresh();
     setInterval(() => this.refresh(), 3000);
   }
-  private error(err: unknown): void {
-    this.alert.textContent = err instanceof Error ? err.message : String(err);
+  // Connectivity alerts clear themselves once the server answers again;
+  // action errors stay until the next successful mutation or dismissal.
+  private error(
+    err: unknown,
+    kind: "action" | "connectivity" = "action",
+  ): void {
+    this.alert.replaceChildren(
+      el("span", "", err instanceof Error ? err.message : String(err)),
+      button("Dismiss", () => (this.alert.hidden = true), "alert-dismiss", "×"),
+    );
+    this.alert.dataset.kind = kind;
+    this.alert.hidden = false;
+  }
+  private alertSetup(): void {
+    this.alert.replaceChildren(
+      el(
+        "span",
+        "",
+        "Install tmux to start terminals. It keeps your shells running when the app is closed.",
+      ),
+      button("Open setup", () => setupDialog(), "secondary alert-action"),
+    );
+    this.alert.dataset.kind = "setup";
     this.alert.hidden = false;
   }
   private async refresh(): Promise<void> {
@@ -324,12 +345,16 @@ class WorkspaceApp {
     this.polling = true;
     const revision = this.revision;
     try {
-      const state = await api<Workspace>();
+      // A hung poll must not hide a dead server behind "Connected" for a minute.
+      const state = await api<Workspace>("", "GET", undefined, {
+        timeoutMs: 10_000,
+      });
       if (revision !== this.revision) return;
       const signature = JSON.stringify(state);
       this.state = state;
       this.status.textContent = "●  Connected";
       this.status.dataset.online = "true";
+      if (this.alert.dataset.kind === "connectivity") this.alert.hidden = true;
       if (!this.initialized) {
         try {
           const saved = JSON.parse(localStorage.getItem(STORAGE) || "{}");
@@ -388,8 +413,10 @@ class WorkspaceApp {
         }
         this.initialized = true;
         this.startHeadButton.disabled = false;
+        // First run: the native app always offers setup; a browser does so
+        // when the server can run the installer or tmux is missing.
         if (
-          nativeHandler("installTools") &&
+          (nativeHandler("installTools") || !state.tmuxAvailable) &&
           !state.projects.length &&
           localStorage.getItem("cloovies.workspace.onboarded.v1") !== "yes"
         )
@@ -407,14 +434,18 @@ class WorkspaceApp {
         this.renderSidebar();
         this.renderCanvas();
       }
-      if (!state.tmuxAvailable)
-        this.error(
-          "Install tmux to start terminals. On macOS: brew install tmux",
-        );
+      if (!state.tmuxAvailable) {
+        if (this.alert.dataset.kind !== "setup" || this.alert.hidden)
+          this.alertSetup();
+      } else if (this.alert.dataset.kind === "setup") this.alert.hidden = true;
     } catch (err) {
       this.status.textContent = "●  Offline · retrying";
       this.status.dataset.online = "false";
-      if (!this.initialized) this.error(err);
+      if (!this.initialized)
+        this.error(
+          "The workspace server is not answering yet. Retrying…",
+          "connectivity",
+        );
     } finally {
       this.polling = false;
     }
@@ -484,7 +515,11 @@ class WorkspaceApp {
   ): Promise<T> {
     this.revision++;
     const result = await api<T>(path, method, data);
-    await this.reloadState();
+    try {
+      await this.reloadState();
+    } catch {
+      // The change already happened; the next poll converges the view.
+    }
     return result;
   }
   private async reloadState(): Promise<void> {
@@ -1415,8 +1450,10 @@ class WorkspaceApp {
     // Native CLIs own Tab and Shift+Tab for completion, menus and modes.
     // Ctrl+Tab remains an explicit pane switch when the terminal has focus.
     if (e.key === "Tab" && !e.metaKey && !e.altKey) {
-      if (!e.ctrlKey && (e.target as HTMLElement)?.closest(".terminal-host"))
-        return;
+      const target = e.target as HTMLElement | null;
+      if (!e.ctrlKey && target?.closest(".terminal-host")) return;
+      // Sidebar, toolbar and dialogs keep native focus order.
+      if (!e.ctrlKey && !target?.closest(".terminal-pane, .team-graph")) return;
       const order =
         this.view === "team"
           ? this.state.terminals

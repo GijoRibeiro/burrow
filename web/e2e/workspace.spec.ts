@@ -1533,6 +1533,132 @@ test("first-run setup offers installation and detects readiness", async ({
   await expect(dialog).toHaveCount(0);
 });
 
+test("first-run setup installs inside the app with live output and version detail", async ({
+  page,
+}, info) => {
+  let installed = false;
+  await page.route("**/api/workspace", (route) =>
+    route.fulfill({
+      json: { version: 1, projects: [], terminals: [], tmuxAvailable: false },
+    }),
+  );
+  await page.route("**/api/workspace/setup", (route) =>
+    route.fulfill({
+      json: {
+        platform: "darwin",
+        ready: installed,
+        git: true,
+        tmux: installed,
+        claude: true,
+        codex: false,
+        gh: false,
+        homebrew: true,
+        installer: true,
+        tools: {
+          git: {
+            installed: true,
+            path: "/usr/bin/git",
+            version: "2.45.0",
+            required: true,
+            label: "Git",
+            purpose: "Projects",
+          },
+          tmux: {
+            installed,
+            path: installed ? "/opt/homebrew/bin/tmux" : "",
+            version: installed ? "3.8" : "",
+            required: true,
+            label: "tmux",
+            purpose: "Keeps terminals running",
+          },
+          claude: {
+            installed: true,
+            path: "/Users/me/.local/bin/claude",
+            version: "2.1.0",
+            required: false,
+            label: "Claude Code",
+            purpose: "Agent",
+          },
+          codex: {
+            installed: false,
+            required: false,
+            label: "Codex",
+            purpose: "Agent",
+          },
+          gh: {
+            installed: false,
+            required: false,
+            label: "GitHub CLI",
+            purpose: "Clones",
+          },
+        },
+      },
+    }),
+  );
+  const requested: string[] = [];
+  await page.routeWebSocket(/\/api\/workspace\/setup\/install/, (ws) => {
+    requested.push(new URL(ws.url()).searchParams.get("tool") || "");
+    ws.onMessage((message) => {
+      const frame = JSON.parse(String(message)) as {
+        type: string;
+        data?: string;
+      };
+      if (frame.type === "input" && frame.data?.includes("\r")) {
+        ws.send(Buffer.from("Password accepted. Installing tmux… done\r\n"));
+        installed = true;
+        ws.send(JSON.stringify({ type: "exit", code: 0 }));
+      }
+    });
+    ws.send(Buffer.from("==> Installing tmux\r\nPassword: "));
+  });
+  await page.goto("/");
+  const dialog = page.getByRole("dialog", { name: "Workspace setup" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('[data-tool="git"] .setup-installed')).toHaveText(
+    "Installed · 2.45.0",
+  );
+  await expect(dialog.locator('[data-tool="tmux"] .setup-missing')).toHaveText(
+    "Missing · required",
+  );
+  await expect(
+    dialog.locator('[data-tool="claude"] .setup-installed'),
+  ).toHaveAttribute("title", "/Users/me/.local/bin/claude");
+  await expect(
+    dialog.getByRole("button", { name: "Ask Claude to set this up" }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByRole("button", { name: "Start using the workspace" }),
+  ).toBeDisabled();
+  await dialog.getByRole("button", { name: "Install required tools" }).click();
+  const console_ = dialog.locator(".setup-console");
+  await expect(console_).toBeVisible();
+  await expect(console_).toContainText("Installing tmux");
+  await expect(console_).toContainText("Password:");
+  await page.keyboard.type("hunter2");
+  await page.keyboard.press("Enter");
+  await expect(console_).toContainText("Installing tmux… done");
+  await expect(console_.locator(".setup-console-title")).toContainText(
+    "finished",
+  );
+  expect(requested).toEqual(["required"]);
+  await expect(
+    dialog.locator('[data-tool="tmux"] .setup-installed'),
+  ).toHaveText("Installed · 3.8");
+  await expect(
+    dialog.getByRole("button", { name: "Start using the workspace" }),
+  ).toBeEnabled();
+  await page.screenshot({
+    path: info.outputPath("in-app-installer.png"),
+    animations: "disabled",
+  });
+  await dialog.getByRole("button", { name: "Close setup" }).click();
+  // Without tmux the workspace points back at setup instead of a dead end.
+  const alert = page.getByRole("alert").filter({ hasText: "Install tmux" });
+  await expect(alert).toBeVisible();
+  await alert.getByRole("button", { name: "Open setup" }).click();
+  await expect(dialog).toBeVisible();
+});
+
 test("launch buttons share a row and wrap only in narrow panes", async ({
   page,
 }, info) => {
@@ -1554,7 +1680,10 @@ test("launch buttons share a row and wrap only in narrow panes", async ({
   expect(new Set(await y()).size).toBe(1);
   await expect(page.locator(".brand-name")).toHaveCount(0);
   await expect(page.locator(".brand")).toHaveCSS("justify-content", "center");
-  await expect(page.locator(".brand .creature-frame").first()).toHaveCSS("animation-name", /creature-poses/);
+  await expect(page.locator(".brand .creature-frame").first()).toHaveCSS(
+    "animation-name",
+    /creature-poses/,
+  );
   await page.screenshot({
     path: info.outputPath("launch-buttons-wide.png"),
     animations: "disabled",
@@ -4627,8 +4756,12 @@ test("Linear connection separates connected and credential states", async ({
   await page.goto("/");
   const open = async () => {
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByRole("button", { name: "Connections", exact: true }).click();
-    await page.getByRole("button", { name: "Linear connection", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Connections", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Linear connection", exact: true })
+      .click();
   };
   await open();
   const d = page.getByRole("dialog", {
@@ -4995,14 +5128,25 @@ test("sidebar motion fits terminals once and terminal questions stay beside the 
   }
 });
 
-test("settings preview and persist backgrounds while native terminal fits inside its pane", async ({ page }, info) => {
+test("settings preview and persist backgrounds while native terminal fits inside its pane", async ({
+  page,
+}, info) => {
   await page.goto("/");
   await add(page, "Cloovies", "Settings colors");
-  const pane = page.getByRole("region", { name: "Settings colors terminal", exact: true });
+  const pane = page.getByRole("region", {
+    name: "Settings colors terminal",
+    exact: true,
+  });
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   const settings = page.getByRole("dialog", { name: "Settings", exact: true });
   await settings.getByRole("button", { name: "Midnight background" }).click();
-  await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--bg"))).toBe("#15171c");
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        getComputedStyle(document.documentElement).getPropertyValue("--bg"),
+      ),
+    )
+    .toBe("#15171c");
   await settings.getByLabel("Background hex color").fill("oops");
   await settings.getByLabel("Background hex color").press("Enter");
   await expect(settings.locator(".settings-error")).toContainText("six-digit");
@@ -5010,43 +5154,92 @@ test("settings preview and persist backgrounds while native terminal fits inside
   await settings.getByLabel("Background hex color").press("Enter");
   await expect(settings.locator(".settings-error")).toBeEmpty();
   await settings.getByLabel("Text size", { exact: true }).fill("18");
-  await settings.screenshot({ path: info.outputPath("settings-appearance.png") });
+  await settings.screenshot({
+    path: info.outputPath("settings-appearance.png"),
+  });
   await page.setViewportSize({ width: 430, height: 820 });
-  expect(await settings.evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
+  expect(await settings.evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(
+    true,
+  );
   await settings.screenshot({ path: info.outputPath("settings-narrow.png") });
-  await settings.getByRole("button", { name: "Connections", exact: true }).click();
-  await expect(settings.getByRole("button", { name: "Linear connection", exact: true })).toBeVisible();
+  await settings
+    .getByRole("button", { name: "Connections", exact: true })
+    .click();
+  await expect(
+    settings.getByRole("button", { name: "Linear connection", exact: true }),
+  ).toBeVisible();
   await settings.getByRole("button", { name: "General", exact: true }).click();
-  await expect(settings.getByRole("button", { name: "Setup and tools", exact: true })).toBeVisible();
+  await expect(
+    settings.getByRole("button", { name: "Setup and tools", exact: true }),
+  ).toBeVisible();
   await settings.getByRole("button", { name: "Close settings" }).click();
   await page.setViewportSize({ width: 1250, height: 810 });
   await page.reload();
-  await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--bg"))).toBe("#101418");
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        getComputedStyle(document.documentElement).getPropertyValue("--bg"),
+      ),
+    )
+    .toBe("#101418");
   await expect(pane.locator(".connection-state")).toHaveText("Live");
-  await expect(pane.locator(".xterm-viewport")).toHaveCSS("background-color", "rgb(16, 20, 24)");
+  await expect(pane.locator(".xterm-viewport")).toHaveCSS(
+    "background-color",
+    "rgb(16, 20, 24)",
+  );
   for (const height of [810, 705, 943]) {
     await page.setViewportSize({ width: 1250, height });
     // The rendered cell grid must leave the full bottom inset even at fractional
     // font metrics. This caught the previous border-box padding overestimate.
-    await expect.poll(() => pane.evaluate((e) => {
-      const surface = e.querySelector(".pane-surface")!.getBoundingClientRect();
-      const screen = e.querySelector(".xterm-screen")!.getBoundingClientRect();
-      return surface.bottom - screen.bottom;
-    })).toBeGreaterThanOrEqual(13);
-    await expect.poll(() => pane.evaluate((e) => {
-      const surface = e.querySelector(".pane-surface")!.getBoundingClientRect();
-      const screen = e.querySelector(".xterm-screen")!.getBoundingClientRect();
-      return surface.right - screen.right;
-    })).toBeGreaterThanOrEqual(9);
+    await expect
+      .poll(() =>
+        pane.evaluate((e) => {
+          const surface = e
+            .querySelector(".pane-surface")!
+            .getBoundingClientRect();
+          const screen = e
+            .querySelector(".xterm-screen")!
+            .getBoundingClientRect();
+          return surface.bottom - screen.bottom;
+        }),
+      )
+      .toBeGreaterThanOrEqual(13);
+    await expect
+      .poll(() =>
+        pane.evaluate((e) => {
+          const surface = e
+            .querySelector(".pane-surface")!
+            .getBoundingClientRect();
+          const screen = e
+            .querySelector(".xterm-screen")!
+            .getBoundingClientRect();
+          return surface.right - screen.right;
+        }),
+      )
+      .toBeGreaterThanOrEqual(9);
   }
-  await send(page, "Settings colors", "printf '\\033[31mRed ANSI\\033[0m  \\033[32mGreen ANSI\\033[0m  \\033[38;2;18;171;203mTruecolor cyan\\033[0m\\n'");
-  await send(page, "Settings colors", "printf '\\033[999;1HBottom row · native terminal'; sleep 2");
+  await send(
+    page,
+    "Settings colors",
+    "printf '\\033[31mRed ANSI\\033[0m  \\033[32mGreen ANSI\\033[0m  \\033[38;2;18;171;203mTruecolor cyan\\033[0m\\n'",
+  );
+  await send(
+    page,
+    "Settings colors",
+    "printf '\\033[999;1HBottom row · native terminal'; sleep 2",
+  );
   const terminalID = await pane.getAttribute("data-terminal-id");
-  await expect.poll(() => capture(terminalID!)).toContain("Bottom row · native terminal");
-  await pane.screenshot({ path: info.outputPath("native-truecolor-insets.png") });
+  await expect
+    .poll(() => capture(terminalID!))
+    .toContain("Bottom row · native terminal");
+  await pane.screenshot({
+    path: info.outputPath("native-truecolor-insets.png"),
+  });
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await settings.getByRole("button", { name: "Reset background" }).click();
-  await expect(settings.getByLabel("Background hex color")).toHaveValue("#2e2f38");
+  await expect(settings.getByLabel("Background hex color")).toHaveValue(
+    "#2e2f38",
+  );
 });
 
 test("account meters show Astra and Fable remaining allowance without footer clutter", async ({
@@ -5121,9 +5314,13 @@ test("account meters show Astra and Fable remaining allowance without footer clu
   await page.screenshot({ path: info.outputPath("account-meters-small.png") });
   await page.keyboard.press("Escape");
   await expect(page.locator("#usage-anthropic-detail")).toBeHidden();
-  await page.getByRole("button", { name: "Fable usage: 0% remaining", exact: true }).press("Enter");
+  await page
+    .getByRole("button", { name: "Fable usage: 0% remaining", exact: true })
+    .press("Enter");
   await expect(page.locator("#usage-anthropic-detail")).toBeVisible();
-  await page.getByRole("button", { name: "Fable usage: 0% remaining", exact: true }).press("Enter");
+  await page
+    .getByRole("button", { name: "Fable usage: 0% remaining", exact: true })
+    .press("Enter");
   await expect(page.locator("#usage-anthropic-detail")).toBeHidden();
 });
 

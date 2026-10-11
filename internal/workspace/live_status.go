@@ -10,7 +10,7 @@ import (
 
 // One process snapshot for all cards; never parse full transcripts just to paint
 // the canvas. Session metadata only applies to a descendant of that exact pane.
-func annotateLiveAgents(terminals []Terminal, panePIDs map[string]int) {
+func annotateLiveAgents(terminals []Terminal, panePIDs map[string]int) map[string]string {
 	hasClaude := false
 	for _, t := range terminals {
 		if t.Program == "claude" && t.Status == "running" {
@@ -19,7 +19,7 @@ func annotateLiveAgents(terminals []Terminal, panePIDs map[string]int) {
 		}
 	}
 	if !hasClaude {
-		return
+		return nil
 	}
 	config := os.Getenv("CLAUDE_CONFIG_DIR")
 	if config == "" {
@@ -28,11 +28,11 @@ func annotateLiveAgents(terminals []Terminal, panePIDs map[string]int) {
 	}
 	entries, err := os.ReadDir(filepath.Join(config, "sessions"))
 	if err != nil {
-		return
+		return nil
 	}
 	out, err := command("", "ps", "-axo", "pid=,ppid=")
 	if err != nil {
-		return
+		return nil
 	}
 	parents := map[int]int{}
 	for _, line := range strings.Split(out, "\n") {
@@ -57,9 +57,13 @@ func annotateLiveAgents(terminals []Terminal, panePIDs map[string]int) {
 			sessions = append(sessions, s)
 		}
 	}
-	applyLiveAgentStates(terminals, panePIDs, parents, sessions)
+	return applyLiveAgentStates(terminals, panePIDs, parents, sessions)
 }
-func applyLiveAgentStates(terminals []Terminal, panePIDs map[string]int, parents map[int]int, sessions []claudeSession) {
+
+// applyLiveAgentStates paints LiveStatus and returns each pane's discovered
+// Claude session ID, keyed by terminal ID.
+func applyLiveAgentStates(terminals []Terminal, panePIDs map[string]int, parents map[int]int, sessions []claudeSession) map[string]string {
+	found := map[string]string{}
 	for i := range terminals {
 		t := &terminals[i]
 		t.LiveStatus = ""
@@ -75,6 +79,9 @@ func applyLiveAgentStates(terminals []Terminal, panePIDs map[string]int, parents
 				chosen = s
 			}
 		}
+		if chosen.PID != 0 && sessionIDPattern.MatchString(chosen.SessionID) {
+			found[t.ID] = chosen.SessionID
+		}
 		switch chosen.Status {
 		case "busy", "working":
 			t.LiveStatus = "working"
@@ -84,4 +91,5 @@ func applyLiveAgentStates(terminals []Terminal, panePIDs map[string]int, parents
 			t.LiveStatus = "waiting"
 		}
 	}
+	return found
 }

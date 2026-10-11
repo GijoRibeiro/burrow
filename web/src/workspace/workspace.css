@@ -2312,6 +2312,58 @@ textarea {
 .setup-missing {
   color: var(--muted);
 }
+.setup-check[data-installed="false"] .setup-missing {
+  color: #f0c27a;
+}
+.setup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.setup-console {
+  margin: 0 0 16px;
+  border: 1px solid var(--line);
+  background: var(--terminal-background, #1b1c22);
+}
+.setup-console-title {
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+.setup-console-host {
+  height: 260px;
+  padding: 6px 8px;
+}
+.setup-manual {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px dashed var(--line);
+  font-size: 12px;
+}
+.setup-manual code {
+  user-select: all;
+  font-family: "Google Sans Code", monospace;
+}
+.alert {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.alert > span {
+  flex: 1;
+}
+.alert-dismiss {
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
 .agent-content .agent-empty {
   max-width: none;
 }

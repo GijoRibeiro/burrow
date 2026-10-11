@@ -10,7 +10,7 @@ The repository uses **Burrow** as a working name. The current app bundle and com
 
 ## Download and setup
 
-Download the app from [Releases](https://github.com/GijoRibeiro/burrow/releases). It runs on Apple Silicon and Intel Macs with macOS 13 or newer. First-run setup offers installation of Git and tmux, plus optional Claude Code and Codex. Each person signs in with their own accounts. See [installation and sharing instructions](docs/INSTALL.md), including the first-open step for this unnotarized build.
+Download the app from [Releases](https://github.com/GijoRibeiro/burrow/releases). It runs on Apple Silicon and Intel Macs with macOS 13 or newer. First-run setup shows which tools this Mac has (with versions and paths) and installs the missing ones inside the app with live output: Git and tmux are required; Claude Code, Codex, and the GitHub CLI are optional. If Claude Code is already present you can hand the setup to it instead. Setup stays reachable later from Settings → Setup and tools, and the workspace points back to it whenever tmux is missing. Each person signs in with their own accounts. See [installation and sharing instructions](docs/INSTALL.md), including the first-open step for this unnotarized build.
 
 To produce the shareable ZIP yourself, run `make workspace-package`. The archive contains the app and setup instructions, without personal workspace data.
 
@@ -61,7 +61,7 @@ Agent chat keeps a recent window of up to 60 messages. **Earlier / Newer** loads
 
 Right-click a sidebar terminal for Show/Hide, Focus, Rename, Terminate, and (when stopped) Start or Remove. Right-click a project heading to create a worktree, start a terminal, or remove the project from the workspace. Right-click a checkout row for its actions too: the main checkout offers removal of the project from the workspace; linked worktrees offer removal of that checkout from disk, retaining the branch. The **MAIN** badge identifies the main checkout, while the adjacent name is its current branch. The heading’s **+** creates a worktree. Shift+F10 opens the same menus from the keyboard; arrows navigate and Escape closes.
 
-**Hide** only removes the pane from view. **Stop** ends its shell and running processes after confirmation. **Start** opens a fresh shell in a stopped or exited session. Removing a worktree refuses dirty checkouts and worktrees with active terminal sessions; removing a project never deletes its files.
+**Hide** only removes the pane from view. **Stop** ends its shell and running processes after confirmation. **Start** opens a fresh shell in a stopped or exited session; for Claude and Codex it resumes the agent's previous conversation when its transcript still exists, so a stop, crash, or reboot does not lose the thread. Removing a worktree refuses dirty checkouts and worktrees with active terminal sessions; removing a project never deletes its files.
 
 In Chat, Tab and Shift+Tab cycle agents. In Terminal, those keys belong to the CLI; Ctrl+Tab and Ctrl+Shift+Tab cycle panes from either view. Dialogs retain normal Tab navigation.
 
@@ -177,7 +177,9 @@ Slack write-tool denials. They do not send Slack replies or create tickets.
 - Visible layout, pane view choices, creatures, unsent message drafts, and terminal font size: the browser/webview's local storage. Native and browser layouts are independent.
 - Closing or restarting Cloovies preserves shells. Quitting stops the app’s HTTP
   server, so head coordination tools and scheduled scans resume when the app
-  reopens; the underlying agents and terminals keep running. Rebooting the computer ends processes; the saved sessions can then be started again.
+  reopens; the underlying agents and terminals keep running. Rebooting the computer ends processes; **Start** brings each session back, resuming agent conversations where possible.
+- Terminal links are live in both directions: the server pings idle connections and drops clients that stop answering, and a pane that hears nothing for 45 seconds (for example after sleep) reconnects by itself, keeping its scrollback. A pane whose tmux session is gone shows **Stopped** with a Start button instead of retrying forever.
+- tmux runs with a 20,000-line history, no prefix key (Ctrl+B reaches your programs), and a 10 ms escape delay; these are set on the dedicated server before the first session.
 - **Keep awake** is on by default in the Mac app. Toggle it at the bottom of the
   sidebar or in the app menu; your choice is remembered. It prevents idle system
   sleep while Cloovies is running, including with a locked or sleeping display
@@ -186,7 +188,7 @@ Slack write-tool denials. They do not send Slack replies or create tickets.
   macOS power assertion, not a change to your system settings. Browser-only use
   does not keep the Mac awake.
 - The server listens only on loopback. Workspace requests require a local host and same-origin requests; mutations require JSON.
-- The native app uses port 4340. Its log is `~/Library/Logs/Cloovies/workspace.log`. `CLOOVIES_NATIVE_PORT` can select a different native port.
+- The native app uses port 4340. Its log is `~/Library/Logs/Cloovies/workspace.log` (rotated at 5 MB; **Reveal Logs** in the app menu opens it). `CLOOVIES_NATIVE_PORT` can select a different native port. The app and its server share the version in `VERSION`: `/api/workspace/health` reports it, a server left over from an older install is asked to shut down and replaced, a crashed server is restarted (up to three times in two minutes), and the server exits on its own when the app that started it disappears. A busy port is reported immediately with the log's last lines.
 - Tests use separate folders and tmux sockets. For another isolated instance, set both `CLOOVIES_WORKSPACE_DIR` and `CLOOVIES_TMUX_SOCKET`.
 
 See the [Orca comparison and naming ideas](docs/ORCA-COMPARISON.md) for current feature gaps.

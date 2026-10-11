@@ -2,6 +2,7 @@ import { PullRequestLink } from "./pull-request";
 import { terminalTheme } from "./theme";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { api } from "./api";
 import { HostedApps } from "./hosted-apps";
@@ -51,6 +52,12 @@ export class TerminalPane {
   private socket?: WebSocket;
   private observer: ResizeObserver;
   private timer?: ReturnType<typeof setTimeout>;
+  // Liveness: the server pings every 20 s. Silence beyond this means the
+  // socket died without a close frame (sleep, crash), so reconnect on purpose.
+  private lastFrameAt = 0;
+  private watchdog?: ReturnType<typeof setInterval>;
+  private reconnectAttempts = 0;
+  private attached = false;
   private disposed = false;
   private connection = el("span", "connection-state", "Connecting");
   private name = el("span", "terminal-name");
@@ -269,7 +276,15 @@ export class TerminalPane {
       theme: terminalTheme(),
     });
     window.addEventListener("workspace-theme", this.updateTheme);
+    document.addEventListener("visibilitychange", this.onVisibility);
     this.terminal.loadAddon(this.fitAddon);
+    // URLs in native output open in the browser or the native app's handler.
+    this.terminal.loadAddon(
+      new WebLinksAddon((event, uri) => {
+        event.preventDefault();
+        window.open(uri, "_blank", "noopener");
+      }),
+    );
     this.terminal.open(this.host);
     this.terminal.onData((data) => this.input(data));
     this.host.addEventListener(
@@ -563,6 +578,10 @@ export class TerminalPane {
     this.connection.dataset.status = text.toLowerCase();
     this.refreshComposer();
   }
+  // The server closes with this code when the tmux session no longer exists;
+  // retrying would only repeat the same answer.
+  private static readonly CLOSE_STOPPED = 4410;
+  private static readonly SILENCE_LIMIT_MS = 45_000;
   private connect(): void {
     if (
       this.disposed ||
@@ -583,27 +602,78 @@ export class TerminalPane {
         ws.close();
         return;
       }
+      this.reconnectAttempts = 0;
       this.lastSentSize = "";
-      this.terminal.reset();
+      this.lastFrameAt = Date.now();
+      // tmux redraws the current screen on attach. Clearing the viewport keeps
+      // the reattached screen tidy without discarding earlier scrollback.
+      if (this.attached) this.terminal.write("\x1b[2J\x1b[H");
+      else this.terminal.reset();
+      this.attached = true;
       this.status(this.session.status === "exited" ? "Exited" : "Live");
       this.refreshComposer();
       this.fit();
+      clearInterval(this.watchdog);
+      this.watchdog = setInterval(() => this.checkLiveness(), 10_000);
     };
     ws.onmessage = (e) => {
-      if (!this.disposed && e.data instanceof ArrayBuffer)
-        this.terminal.write(new Uint8Array(e.data), () => this.readScreen());
-    };
-    ws.onclose = () => {
       if (this.disposed) return;
-      if (this.session.status === "stopped") {
+      this.lastFrameAt = Date.now();
+      if (e.data instanceof ArrayBuffer) {
+        this.terminal.write(new Uint8Array(e.data), () => this.readScreen());
+        return;
+      }
+      if (typeof e.data === "string") {
+        try {
+          const frame = JSON.parse(e.data) as { type?: string };
+          if (frame.type === "ping" && ws.readyState === WebSocket.OPEN)
+            ws.send(JSON.stringify({ type: "pong" }));
+        } catch {
+          /* Not a control frame. */
+        }
+      }
+    };
+    ws.onclose = (event) => {
+      clearInterval(this.watchdog);
+      if (this.disposed) return;
+      if (
+        this.session.status === "stopped" ||
+        event.code === TerminalPane.CLOSE_STOPPED
+      ) {
         this.status("Stopped");
+        this.restartButton.hidden = false;
+        this.stopButton.hidden = true;
         return;
       }
       this.status("Reconnecting");
-      this.timer = setTimeout(() => this.connect(), 2000);
+      // Back off gently so twenty panes never hammer a restarting server,
+      // but stay quick enough that an app relaunch feels instant.
+      const delay = Math.min(10_000, 1000 * 2 ** this.reconnectAttempts++);
+      this.timer = setTimeout(() => this.connect(), delay);
     };
     ws.onerror = () => ws.close();
   }
+  private checkLiveness(): void {
+    if (this.disposed || this.socket?.readyState !== WebSocket.OPEN) return;
+    if (document.hidden) return;
+    if (Date.now() - this.lastFrameAt > TerminalPane.SILENCE_LIMIT_MS)
+      this.socket.close();
+  }
+  private onVisibility = (): void => {
+    if (document.hidden || this.disposed) return;
+    // Returning from sleep or a background tab: verify the link right away
+    // instead of waiting for the next watchdog tick.
+    if (
+      this.socket?.readyState === WebSocket.OPEN &&
+      Date.now() - this.lastFrameAt > TerminalPane.SILENCE_LIMIT_MS
+    )
+      this.socket.close();
+    else if (this.socket?.readyState === WebSocket.CLOSED && this.timer) {
+      clearTimeout(this.timer);
+      this.reconnectAttempts = 0;
+      this.connect();
+    }
+  };
   private input(data: string): boolean {
     if (this.socket?.readyState !== WebSocket.OPEN) return false;
     this.socket.send(JSON.stringify({ type: "input", data }));
@@ -891,6 +961,8 @@ export class TerminalPane {
   }
   dispose(): void {
     window.removeEventListener("workspace-theme", this.updateTheme);
+    document.removeEventListener("visibilitychange", this.onVisibility);
+    clearInterval(this.watchdog);
     this.images.dispose();
     this.disposed = true;
     this.hostedApps.dispose();

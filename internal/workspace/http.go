@@ -6,9 +6,24 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
+	"time"
 )
+
+// buildVersion is injected at build time:
+//
+//	go build -ldflags "-X github.com/gijo/cloovies/internal/workspace.buildVersion=0.7.0"
+var buildVersion string
+
+// Version reports the daemon build so the native app can detect a stale server.
+func Version() string {
+	if buildVersion == "" {
+		return "dev"
+	}
+	return buildVersion
+}
 
 // Local requests only. Mutations require same-origin JSON, preventing websites
 // from opening shells through a user's localhost service.
@@ -44,7 +59,19 @@ func (m *Manager) Handler() http.Handler {
 	})
 	// Native readiness must not scan repositories or start external processes.
 	mux.HandleFunc("GET /api/workspace/health", func(w http.ResponseWriter, r *http.Request) {
-		respond(w, map[string]string{"service": "cloovies-workspace"}, nil)
+		respond(w, map[string]any{"service": "cloovies-workspace", "version": Version(), "pid": os.Getpid()}, nil)
+	})
+	// A newer app build retires a stale daemon instead of adopting its old UI.
+	mux.HandleFunc("POST /api/workspace/shutdown", func(w http.ResponseWriter, r *http.Request) {
+		if m.shutdown == nil {
+			respond(w, nil, errors.New("this server cannot be stopped remotely"))
+			return
+		}
+		respond(w, map[string]any{"ok": true, "pid": os.Getpid()}, nil)
+		go func() {
+			time.Sleep(200 * time.Millisecond)
+			m.shutdown()
+		}()
 	})
 	mux.HandleFunc("GET /api/workspace", func(w http.ResponseWriter, r *http.Request) { respond(w, m.Snapshot(), nil) })
 	mux.HandleFunc("POST /api/workspace/projects", func(w http.ResponseWriter, r *http.Request) {
